@@ -93,4 +93,5 @@ class AgentResponse(BaseModel):
     message: str
     restaurants: Optional[List[Restaurant]] = None
     error: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None 
+    metadata: Optional[Dict[str, Any]] = None
+    parsed_command: Optional[Any] = None  # Store the parsed command to avoid re-parsing 

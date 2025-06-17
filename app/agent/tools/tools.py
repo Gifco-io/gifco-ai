@@ -92,11 +92,11 @@ class RestaurantAPITool:
             formatted_place = self._format_place_name(place)
             
             # Construct API URL
+            logger.info(self.server_url)
             api_url = f"{self.server_url}/api/questions"
             params = {
                 "type": query_type,
                 "place": formatted_place,
-                "q": query
             }
             
             logger.info(f"Making API call to: {api_url} with params: {params}")
@@ -129,13 +129,41 @@ class RestaurantAPITool:
             JSON string with restaurant search results
         """
         try:
-            # Run the async API call
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            result = loop.run_until_complete(
-                self._call_restaurant_api(query, place, query_type)
-            )
-            loop.close()
+            # Check if there's already an event loop running
+            try:
+                # If we're in an async context, get the current loop
+                loop = asyncio.get_running_loop()
+                # Create a new thread to run the async function
+                import concurrent.futures
+                import threading
+                
+                def run_in_thread():
+                    # Create a new event loop in this thread
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    try:
+                        result = new_loop.run_until_complete(
+                            self._call_restaurant_api(query, place, query_type)
+                        )
+                        return result
+                    finally:
+                        new_loop.close()
+                
+                # Run in a separate thread
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(run_in_thread)
+                    result = future.result(timeout=30)  # 30 second timeout
+                    
+            except RuntimeError:
+                # No event loop running, we can create one safely
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    result = loop.run_until_complete(
+                        self._call_restaurant_api(query, place, query_type)
+                    )
+                finally:
+                    loop.close()
             
             return json.dumps(result, indent=2)
             

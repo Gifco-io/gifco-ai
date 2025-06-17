@@ -15,14 +15,14 @@ from pydantic import BaseModel
 
 from .tools.tools import get_restaurant_tools
 from .character.character import RestaurantRecommenderCharacter
-from .safety.validator import SafetyValidator
-from .operations.restaurant import RestaurantOperations
+# from .safety.validator import SafetyValidator
+# from .operations.restaurant import RestaurantOperations
 from ..commands.parser import CommandParser
 from ..commands.models import (
     RestaurantCommand, RestaurantQuery, SearchCommand, 
     RecommendationCommand, InformationalCommand
 )
-from .models import AgentResponse
+from ..models.restaurant import AgentResponse
 from app.config.config import OpenAIConfig, RestaurantAPIConfig
 
 logger = logging.getLogger(__name__)
@@ -40,18 +40,87 @@ class OpenAILoggingHandler(BaseCallbackHandler):
         """Log when LLM finishes generating."""
         logger.info(f"\nLLM Response:")
         try:
-            # Try to get function call details
-            if hasattr(response, 'additional_kwargs') and 'function_call' in response.additional_kwargs:
-                func_call = response.additional_kwargs['function_call']
-                logger.info(f"Function Call:\n  Name: {func_call.get('name')}\n  Arguments: {func_call.get('arguments')}")
-            # Log the full response
-            if hasattr(response, 'model_dump'):
-                logger.info(f"Full Response:\n{json.dumps(response.model_dump(), indent=2)}")
+            # Log response type for debugging
+            logger.info(f"Response type: {type(response)}")
+            
+            # Handle different response types more robustly
+            if hasattr(response, 'generations') and response.generations:
+                # LLMResult object - get the first generation
+                logger.info("Handling LLMResult object")
+                generation = response.generations[0][0]
+                
+                if hasattr(generation, 'message'):
+                    # AIMessage within generation
+                    message = generation.message
+                    logger.info(f"Found message in generation: {type(message)}")
+                    
+                    # Log function calls if present
+                    if hasattr(message, 'additional_kwargs') and message.additional_kwargs:
+                        if 'function_call' in message.additional_kwargs:
+                            func_call = message.additional_kwargs['function_call']
+                            logger.info(f"Function Call:\n  Name: {func_call.get('name')}\n  Arguments: {func_call.get('arguments')}")
+                        if 'tool_calls' in message.additional_kwargs:
+                            tool_calls = message.additional_kwargs['tool_calls']
+                            logger.info(f"Tool calls: {json.dumps(tool_calls, indent=2)}")
+                    
+                    # Log content if present
+                    if hasattr(message, 'content') and message.content:
+                        logger.info(f"Response content: {message.content}")
+                    else:
+                        logger.info(f"Message object: {str(message)}")
+                        
+                elif hasattr(generation, 'text'):
+                    # Simple text generation
+                    logger.info(f"Response text: {generation.text}")
+                elif hasattr(generation, 'content'):
+                    logger.info(f"Generation content: {generation.content}")
+                else:
+                    logger.info(f"Generation object: {str(generation)}")
+                    
+            elif hasattr(response, 'additional_kwargs'):
+                # Direct AIMessage or similar
+                logger.info("Handling direct message response")
+                
+                # Log function calls if present
+                if response.additional_kwargs:
+                    if 'function_call' in response.additional_kwargs:
+                        func_call = response.additional_kwargs['function_call']
+                        logger.info(f"Function Call:\n  Name: {func_call.get('name')}\n  Arguments: {func_call.get('arguments')}")
+                    if 'tool_calls' in response.additional_kwargs:
+                        tool_calls = response.additional_kwargs['tool_calls']
+                        logger.info(f"Tool calls: {json.dumps(tool_calls, indent=2)}")
+                
+                if hasattr(response, 'content') and response.content:
+                    logger.info(f"Response content: {response.content}")
+                else:
+                    logger.info(f"Response object: {str(response)}")
+                    
             else:
-                logger.info(f"Full Response:\n{json.dumps(response.dict(), indent=2)}")
+                # Fallback - log what we can safely
+                logger.info("Fallback response handling")
+                
+                # Try to serialize the response
+                if hasattr(response, 'model_dump'):
+                    try:
+                        logger.info(f"Full Response:\n{json.dumps(response.model_dump(), indent=2)}")
+                    except Exception as serialize_error:
+                        logger.info(f"Could not serialize response: {serialize_error}")
+                        logger.info(f"Response string: {str(response)}")
+                elif hasattr(response, 'dict'):
+                    try:
+                        logger.info(f"Full Response:\n{json.dumps(response.dict(), indent=2)}")
+                    except Exception as serialize_error:
+                        logger.info(f"Could not serialize response: {serialize_error}")
+                        logger.info(f"Response string: {str(response)}")
+                else:
+                    logger.info(f"Response: {str(response)}")
+                
         except Exception as e:
             logger.error(f"Error logging response: {e}")
+            logger.error(f"Response type: {type(response)}")
+            logger.error(f"Response attributes: {dir(response) if hasattr(response, '__dict__') else 'No attributes'}")
             logger.info(f"Raw Response: {response}")
+        
         logger.info(f"{'='*50}\n")
     
     def on_llm_error(self, error, **kwargs):
@@ -172,11 +241,11 @@ class RestaurantRecommenderAgent:
 
     def __init__(
         self,
-        model_name: str = "openai/gpt-4o-2024-11-20",
+        model_name: str = "openai/gpt-4o-mini-2024-07-18",
 
         temperature: float = 0.7,
         command_parser: Optional[CommandParser] = None,
-        safety_validator: Optional[SafetyValidator] = None,
+        # safety_validator: Optional[SafetyValidator] = None,
     ):
         """Initialize the RestaurantRecommender agent.
 
@@ -194,14 +263,16 @@ class RestaurantRecommenderAgent:
             model_name=model_name,
             temperature=temperature,
             callbacks=[OpenAILoggingHandler()],
-            base_url=os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
+            base_url=os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1"),
+            request_timeout=30,  # Add 30 second timeout
+            max_retries=1  # Limit retries to prevent long delays
         )
         
         
 
         self.character = RestaurantRecommenderCharacter()       
-        self.validator = safety_validator or SafetyValidator()
-        self.operations = RestaurantOperations()
+        # self.validator = safety_validator or SafetyValidator()
+        # self.operations = RestaurantOperations()
         self.command_parser = command_parser or CommandParser()
         
         # Create agent with tools
@@ -231,11 +302,14 @@ class RestaurantRecommenderAgent:
         Returns:
             Whether the request is valid
         """
-        request = state.messages[-1]["content"]
-        is_valid, reason = self.validator.validate_request(request)
-        if not is_valid:
-            state.output = reason
-        return is_valid
+        # Validator is currently commented out, so always return True for now
+        # TODO: Implement proper validation when SafetyValidator is available
+        return True
+        # request = state.messages[-1]["content"]
+        # is_valid, reason = self.validator.validate_request(request)
+        # if not is_valid:
+        #     state.output = reason
+        # return is_valid
 
     async def invoke(self, state: AgentState) -> AgentState:
         """Invoke the agent.
@@ -295,9 +369,13 @@ class RestaurantRecommenderAgent:
 - Help with specific food cravings like "best butter chicken"
 
 Just ask me what you're looking for!"""
-                return AgentResponse(success=True, message=help_msg)
+                response = AgentResponse(success=True, message=help_msg)
+                response.parsed_command = command  # Store the parsed command
+                return response
             
-            return await self.execute_command(command)
+            response = await self.execute_command(command)
+            response.parsed_command = command  # Store the parsed command
+            return response
             
         except Exception as e:
             logger.error(f"Error handling request: {str(e)}", exc_info=True)

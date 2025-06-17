@@ -47,13 +47,79 @@ class CommandParserLoggingHandler(BaseCallbackHandler):
         """Log when LLM finishes generating."""
         logger.info(f"\n{'='*80}\nCommand Parser LLM Response:")
         try:
-            if hasattr(response, 'additional_kwargs') and 'tool_calls' in response.additional_kwargs:
-                tool_calls = response.additional_kwargs['tool_calls']
-                logger.info(f"Tool calls: {json.dumps(tool_calls, indent=2)}")
-            logger.info(f"Response content: {response.content}")
+            # Log response type for debugging
+            logger.info(f"Response type: {type(response)}")
+            
+            # Handle different response types more robustly
+            if hasattr(response, 'generations') and response.generations:
+                # LLMResult object - get the first generation
+                logger.info("Handling LLMResult object")
+                generation = response.generations[0][0]
+                
+                if hasattr(generation, 'message'):
+                    # AIMessage within generation
+                    message = generation.message
+                    logger.info(f"Found message in generation: {type(message)}")
+                    
+                    # Log tool calls if present
+                    if hasattr(message, 'additional_kwargs') and message.additional_kwargs:
+                        if 'tool_calls' in message.additional_kwargs:
+                            tool_calls = message.additional_kwargs['tool_calls']
+                            logger.info(f"Tool calls: {json.dumps(tool_calls, indent=2)}")
+                    
+                    # Log content if present
+                    if hasattr(message, 'content') and message.content:
+                        logger.info(f"Response content: {message.content}")
+                    else:
+                        logger.info(f"Message object: {str(message)}")
+                        
+                elif hasattr(generation, 'text'):
+                    # Simple text generation
+                    logger.info(f"Response text: {generation.text}")
+                elif hasattr(generation, 'content'):
+                    logger.info(f"Generation content: {generation.content}")
+                else:
+                    logger.info(f"Generation object: {str(generation)}")
+                    
+            elif hasattr(response, 'additional_kwargs'):
+                # Direct AIMessage or similar
+                logger.info("Handling direct message response")
+                
+                if response.additional_kwargs and 'tool_calls' in response.additional_kwargs:
+                    tool_calls = response.additional_kwargs['tool_calls']
+                    logger.info(f"Tool calls: {json.dumps(tool_calls, indent=2)}")
+                
+                if hasattr(response, 'content') and response.content:
+                    logger.info(f"Response content: {response.content}")
+                else:
+                    logger.info(f"Response object: {str(response)}")
+                    
+            else:
+                # Fallback - log what we can safely
+                logger.info("Fallback response handling")
+                
+                # Try to serialize the response
+                if hasattr(response, 'model_dump'):
+                    try:
+                        logger.info(f"Response data: {json.dumps(response.model_dump(), indent=2)}")
+                    except Exception as serialize_error:
+                        logger.info(f"Could not serialize response: {serialize_error}")
+                        logger.info(f"Response string: {str(response)}")
+                elif hasattr(response, 'dict'):
+                    try:
+                        logger.info(f"Response data: {json.dumps(response.dict(), indent=2)}")
+                    except Exception as serialize_error:
+                        logger.info(f"Could not serialize response: {serialize_error}")
+                        logger.info(f"Response string: {str(response)}")
+                else:
+                    logger.info(f"Response: {str(response)}")
+                
         except Exception as e:
             logger.error(f"Error logging response: {e}")
+            logger.error(f"Response type: {type(response)}")
+            logger.error(f"Response attributes: {dir(response) if hasattr(response, '__dict__') else 'No attributes'}")
             logger.info(f"Raw Response: {response}")
+        
         logger.info('='*80)
     
     def on_llm_error(self, error, **kwargs):
@@ -69,7 +135,7 @@ class CommandParser:
     recommendation requests, and informational queries.
     """
 
-    def __init__(self, model_name: str = "openai/gpt-4o-2024-11-20", temperature: float = 0.0, server_url: str = None):
+    def __init__(self, model_name: str = "openai/gpt-4o-mini-2024-07-18", temperature: float = 0.0, server_url: str = None):
         """Initialize the command parser.
         
         Args:
@@ -83,7 +149,9 @@ class CommandParser:
             model_name=model_name,
             temperature=temperature,
             callbacks=[CommandParserLoggingHandler()],
-            base_url=os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
+            base_url=os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1"),
+            request_timeout=30,  # Add 30 second timeout
+            max_retries=1  # Limit retries to prevent long delays
         )
         self.server_url = server_url or os.getenv("RESTAURANT_SERVER_URL", "http://localhost:8000")
         self._functions = self._get_command_functions()
@@ -253,9 +321,9 @@ Extract all relevant information and choose the most appropriate function."""
                     query = RestaurantQuery(
                         query=func_args.get("query", ""),
                         place=func_args.get("place"),
-                        cuisine=func_args.get("cuisine"),
-                        price_range=func_args.get("price_range"),
-                        dietary_restrictions=func_args.get("dietary_restrictions")
+                        # cuisine=func_args.get("cuisine"), 
+                        # price_range=func_args.get("price_range"),
+                        # dietary_restrictions=func_args.get("dietary_restrictions")
                     )
                     command = SearchCommand(search_query=query)
                     command.original_request = request
@@ -265,9 +333,9 @@ Extract all relevant information and choose the most appropriate function."""
                     query = RestaurantQuery(
                         query=func_args.get("query", ""),
                         place=func_args.get("place"),
-                        cuisine=func_args.get("cuisine"),
-                        price_range=func_args.get("price_range"),
-                        dietary_restrictions=func_args.get("dietary_restrictions")
+                        # cuisine=func_args.get("cuisine"),
+                        # price_range=func_args.get("price_range"),
+                        # dietary_restrictions=func_args.get("dietary_restrictions")
                     )
                     command = RecommendationCommand(recommendation_query=query)
                     command.original_request = request
@@ -324,12 +392,10 @@ Extract all relevant information and choose the most appropriate function."""
                 search_tool = self.get_restaurant_tool("search_restaurants")
                 if search_tool:
                     query = command.search_query
-                    tool_response = search_tool.func(
+                    result["tool_response"] = search_tool.func(
                         query=query.query,
-                        place=query.place or "New Delhi",
-                        query_type="current"
+                        place=query.place or "New Delhi"
                     )
-                    result["tool_response"] = json.loads(tool_response) if isinstance(tool_response, str) else tool_response
                 else:
                     result["error"] = "Search tool not available"
                     
@@ -338,12 +404,10 @@ Extract all relevant information and choose the most appropriate function."""
                 search_tool = self.get_restaurant_tool("search_restaurants")
                 if search_tool:
                     query = command.recommendation_query
-                    tool_response = search_tool.func(
+                    result["tool_response"] = search_tool.func(
                         query=query.query,
-                        place=query.place or "New Delhi",
-                        query_type="trending"  # Use trending for recommendations
+                        place=query.place or "New Delhi"
                     )
-                    result["tool_response"] = json.loads(tool_response) if isinstance(tool_response, str) else tool_response
                 else:
                     result["error"] = "Search tool not available"
                     
@@ -388,3 +452,39 @@ Extract all relevant information and choose the most appropriate function."""
                 "command": None,
                 "tool_response": None
             }
+
+    def _format_place_name(self, place: str) -> str:
+        """Format place name for API consistency (copied from RestaurantAPITool)."""
+        if not place:
+            return "New Delhi"  # Default location
+        place_lower = place.lower().strip()
+        place_mappings = {
+            "delhi": "New Delhi",
+            "new delhi": "New Delhi",
+            "mumbai": "Mumbai",
+            "bombay": "Mumbai",
+            "bangalore": "Bangalore",
+            "bengaluru": "Bangalore",
+            "kolkata": "Kolkata",
+            "calcutta": "Kolkata",
+            "chennai": "Chennai",
+            "madras": "Chennai",
+            "hyderabad": "Hyderabad",
+            "pune": "Pune",
+            "ahmedabad": "Ahmedabad",
+            "jaipur": "Jaipur",
+            "lucknow": "Lucknow",
+            "kanpur": "Kanpur",
+            "nagpur": "Nagpur",
+            "visakhapatnam": "Visakhapatnam",
+            "indore": "Indore",
+            "thane": "Thane",
+            "bhopal": "Bhopal",
+            "patna": "Patna",
+            "vadodara": "Vadodara",
+            "ghaziabad": "Ghaziabad",
+            "ludhiana": "Ludhiana",
+            "agra": "Agra",
+            "nashik": "Nashik"
+        }
+        return place_mappings.get(place_lower, place.title())
