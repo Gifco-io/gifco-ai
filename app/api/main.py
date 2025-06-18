@@ -3,9 +3,10 @@ import logging
 import os
 import asyncio
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Header
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
+from typing import Optional
 
 from .models.requests import RestaurantQueryRequest, ChatRequest
 from .models.responses import (
@@ -110,7 +111,10 @@ async def health_check():
 
 
 @app.post("/query", response_model=RestaurantQueryResponse)
-async def query_restaurants(request: RestaurantQueryRequest):
+async def query_restaurants(
+    request: RestaurantQueryRequest,
+    authorization: Optional[str] = Header(None)
+):
     """Query restaurants using natural language.
     
     This endpoint processes natural language queries like:
@@ -120,6 +124,7 @@ async def query_restaurants(request: RestaurantQueryRequest):
     
     Args:
         request: Restaurant query request
+        authorization: Optional Authorization header (e.g., "Bearer token")
         
     Returns:
         Restaurant query response with results
@@ -136,12 +141,21 @@ async def query_restaurants(request: RestaurantQueryRequest):
     try:
         logger.info(f"Processing restaurant query: '{request.query}'")
         
+        # Extract token from Authorization header
+        auth_token = None
+        if authorization:
+            if authorization.startswith("Bearer "):
+                auth_token = authorization[7:]  # Remove "Bearer " prefix
+            else:
+                auth_token = authorization  # Use as-is if no Bearer prefix
+        
         # Add timeout to prevent hanging
         import asyncio
         response = await asyncio.wait_for(
             restaurant_service.query(
                 query=request.query,
-                location=request.location
+                location=request.location,
+                auth_token=auth_token
             ),
             timeout=25.0  # 25 second timeout (less than client timeout)
         )
@@ -164,7 +178,10 @@ async def query_restaurants(request: RestaurantQueryRequest):
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(
+    request: ChatRequest,
+    authorization: Optional[str] = Header(None)
+):
     """Chat with the restaurant recommender AI.
     
     This endpoint provides a conversational interface for restaurant queries.
@@ -172,9 +189,11 @@ async def chat(request: ChatRequest):
     - Restaurant search queries
     - General questions about restaurants
     - Help requests
+    - Collection creation requests (requires authorization)
     
     Args:
         request: Chat request with message and optional thread ID
+        authorization: Optional Authorization header (e.g., "Bearer token")
         
     Returns:
         Chat response with AI-generated reply
@@ -190,9 +209,19 @@ async def chat(request: ChatRequest):
     
     try:
         logger.info(f"Processing chat message: '{request.message}'")
+        
+        # Extract token from Authorization header
+        auth_token = None
+        if authorization:
+            if authorization.startswith("Bearer "):
+                auth_token = authorization[7:]  # Remove "Bearer " prefix
+            else:
+                auth_token = authorization  # Use as-is if no Bearer prefix
+        
         response = await restaurant_service.handle_chat(
             message=request.message,
-            thread_id=request.thread_id
+            thread_id=request.thread_id,
+            auth_token=auth_token
         )
         
         logger.info(f"Chat processed successfully: {response.success}")

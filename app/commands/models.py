@@ -1,5 +1,5 @@
 """Command models for restaurant recommendation commands."""
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from pydantic import BaseModel
 from enum import Enum
 
@@ -9,6 +9,7 @@ class CommandType(str, Enum):
     SEARCH = "search"
     RECOMMENDATION = "recommendation"
     INFO = "info"
+    COLLECTION = "collection"
 
 
 class RestaurantCommand(BaseModel):
@@ -42,6 +43,16 @@ class InformationalCommand(RestaurantCommand):
     """Command for informational requests."""
     command_type: CommandType = CommandType.INFO
     topic: str
+
+
+class CollectionCommand(RestaurantCommand):
+    """Command for creating restaurant collections."""
+    command_type: CommandType = CommandType.COLLECTION
+    name: str
+    description: str
+    is_public: bool = True
+    tags: List[str] = []
+    auth_token: str
 
 
 class CommandParseError(Exception):

@@ -2,7 +2,7 @@
 import os
 import json
 import logging
-from typing import Dict, List, Any, Union
+from typing import Dict, List, Any, Union, Optional
 
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
@@ -12,9 +12,9 @@ from pydantic import BaseModel
 
 from .models import (
     RestaurantCommand, RestaurantQuery, SearchCommand, 
-    RecommendationCommand, InformationalCommand, CommandParseError
+    RecommendationCommand, InformationalCommand, CollectionCommand, CommandParseError
 )
-from ..agent.tools.tools import get_restaurant_tools
+from ..agent.tools.tools import RestaurantTool
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +155,7 @@ class CommandParser:
         )
         self.server_url = server_url or os.getenv("RESTAURANT_SERVER_URL", "http://localhost:8000")
         self._functions = self._get_command_functions()
-        self._tools = get_restaurant_tools(self.server_url)
+        self._tools = RestaurantTool.get_restaurant_tools(self.server_url)
         logger.info(f"Command functions: {json.dumps(self._functions, indent=2)}")
 
     def _get_command_functions(self) -> List[Dict[str, Any]]:
@@ -234,6 +234,40 @@ class CommandParser:
             {
                 "type": "function",
                 "function": {
+                    "name": "create_collection",
+                    "description": "Create a new restaurant collection. Use this when the user wants to create a curated list of restaurants with a name, description, tags, and privacy settings.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "description": "Name of the collection (e.g., 'Best Pizza Places', 'Romantic Dinner Spots')"
+                            },
+                            "description": {
+                                "type": "string",
+                                "description": "Description of the collection (e.g., 'A curated list of the best pizza restaurants in the city')"
+                            },
+                            "is_public": {
+                                "type": "boolean",
+                                "description": "Whether the collection should be public (true) or private (false). Default is true."
+                            },
+                            "tags": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "List of tags for the collection (e.g., ['pizza', 'italian', 'comfort food'])"
+                            },
+                            "auth_token": {
+                                "type": "string",
+                                "description": "Authorization token for creating the collection"
+                            }
+                        },
+                        "required": ["name", "description", "auth_token"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
                     "name": "get_info",
                     "description": "Handle informational requests about restaurants, help requests, or general questions.",
                     "parameters": {
@@ -259,7 +293,7 @@ class CommandParser:
         Returns:
             RestaurantCommand: Parsed command object
             
-        Raises:
+        Raises: 
             CommandParseError: If parsing fails
         """
         try:
@@ -267,20 +301,23 @@ class CommandParser:
             
             # Create system message with parsing instructions
             system_message = SystemMessage(
-                content="""You are a restaurant command parser. Your job is to analyze user requests and extract structured information about restaurant searches and recommendations.
+                content="""You are a restaurant command parser. Your job is to analyze user requests and extract structured information about restaurant searches, recommendations, and collection creation.
 
 Guidelines for parsing:
 1. For specific searches (like "best butter chicken spot", "pizza near me"), use search_restaurants
 2. For general recommendations ("recommend a restaurant", "suggest somewhere"), use recommend_restaurants  
-3. For help or informational requests, use get_info
-4. Always try to extract location/place information from context
-5. Extract cuisine type, price preferences, and dietary restrictions when mentioned
-6. Be flexible with location - users might say "near me", "downtown", city names, etc.
+3. For creating collections ("create a collection", "make a list of restaurants"), use create_collection
+4. For help or informational requests, use get_info
+5. Always try to extract location/place information from context
+6. Extract cuisine type, price preferences, and dietary restrictions when mentioned
+7. Be flexible with location - users might say "near me", "downtown", city names, etc.
+8. For collection creation, extract name, description, tags, and privacy settings from user input
 
 Examples:
 - "Best butter chicken spot?" → search_restaurants with query="best butter chicken", place="near me" (if no location specified)
 - "Find Italian restaurants in NYC" → search_restaurants with query="Italian restaurants", place="NYC", cuisine="Italian"
 - "Recommend a good restaurant for dinner" → recommend_restaurants with query="good restaurant for dinner"
+- "Create a collection of pizza places" → create_collection with name="Pizza Places", description extracted from context
 - "Help me find restaurants" → get_info with topic="help"
 
 Extract all relevant information and choose the most appropriate function."""
@@ -341,6 +378,17 @@ Extract all relevant information and choose the most appropriate function."""
                     command.original_request = request
                     return command
                     
+                elif func_name == "create_collection":
+                    command = CollectionCommand(
+                        name=func_args.get("name", ""),
+                        description=func_args.get("description", ""),
+                        is_public=func_args.get("is_public", True),
+                        tags=func_args.get("tags", []),
+                        auth_token=func_args.get("auth_token", ""),
+                        original_request=request
+                    )
+                    return command
+                    
                 elif func_name == "get_info":
                     command = InformationalCommand(topic=func_args.get("topic", "help"))
                     command.original_request = request
@@ -371,11 +419,12 @@ Extract all relevant information and choose the most appropriate function."""
                 return tool
         return None
 
-    def execute_with_tools(self, command: RestaurantCommand) -> Dict[str, Any]:
+    def execute_with_tools(self, command: RestaurantCommand, auth_token: Optional[str] = None) -> Dict[str, Any]:
         """Execute a command using the appropriate tools.
         
         Args:
             command: The parsed command to execute
+            auth_token: Optional authorization token for authenticated operations
             
         Returns:
             Dictionary containing command and tool execution results
@@ -419,6 +468,24 @@ Extract all relevant information and choose the most appropriate function."""
                 else:
                     result["error"] = "Help tool not available"
             
+            elif isinstance(command, CollectionCommand):
+                collection_tool = self.get_restaurant_tool("create_collection")
+                if collection_tool:
+                    # Use the auth_token from the parameter if provided, otherwise use the one from command
+                    token_to_use = auth_token or command.auth_token
+                    if not token_to_use:
+                        result["error"] = "Authorization token required for collection creation"
+                    else:
+                        result["tool_response"] = collection_tool.func(
+                            name=command.name,
+                            description=command.description,
+                            is_public=command.is_public,
+                            tags=command.tags,
+                            auth_token=token_to_use
+                        )
+                else:
+                    result["error"] = "Collection creation tool not available"
+            
             return result
             
         except Exception as e:
@@ -429,11 +496,12 @@ Extract all relevant information and choose the most appropriate function."""
                 "error": str(e)
             }
 
-    def parse_and_execute(self, request: str) -> Dict[str, Any]:
+    def parse_and_execute(self, request: str, auth_token: Optional[str] = None) -> Dict[str, Any]:
         """Parse request and execute using tools.
         
         Args:
             request: Natural language request from user
+            auth_token: Optional authorization token for authenticated operations
             
         Returns:
             Dictionary containing parsed command and tool execution results
@@ -442,8 +510,8 @@ Extract all relevant information and choose the most appropriate function."""
             # Parse the request first
             command = self.parse_request(request)
             
-            # Execute with tools
-            return self.execute_with_tools(command)
+            # Execute with tools, passing auth_token
+            return self.execute_with_tools(command, auth_token=auth_token)
             
         except Exception as e:
             logger.error(f"Error in parse_and_execute: {str(e)}")

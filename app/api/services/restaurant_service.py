@@ -8,7 +8,7 @@ from datetime import datetime
 
 
 from ...commands.parser import CommandParser
-from ...commands.models import SearchCommand, RecommendationCommand, InformationalCommand
+from ...commands.models import SearchCommand, RecommendationCommand, InformationalCommand, CollectionCommand
 from ..models.responses import RestaurantQueryResponse, ChatResponse, RestaurantInfo
 
 logger = logging.getLogger(__name__)
@@ -23,12 +23,13 @@ class RestaurantService:
         self.command_parser = CommandParser(server_url=server_url)
         logger.info(f"RestaurantService initialized with server URL: {server_url}")
     
-    async def query(self, query: str, location: Optional[str] = None) -> RestaurantQueryResponse:
+    async def query(self, query: str, location: Optional[str] = None, auth_token: Optional[str] = None) -> RestaurantQueryResponse:
         """Process a restaurant query using the integrated command parser.
         
         Args:
             query: The restaurant query string
             location: Optional location override
+            auth_token: Optional authorization token for authenticated requests
             
         Returns:
             RestaurantQueryResponse with results
@@ -40,7 +41,7 @@ class RestaurantService:
             enhanced_query = f"{query} in {location}" if location and location.lower() not in query.lower() else query
             
             # Parse and execute using CommandParser
-            parser_result = self.command_parser.parse_and_execute(enhanced_query)
+            parser_result = self.command_parser.parse_and_execute(enhanced_query, auth_token=auth_token)
             
             # Handle parser errors
             if parser_result.get('error'):
@@ -84,12 +85,13 @@ class RestaurantService:
                 timestamp=datetime.now()
             )
     
-    async def handle_chat(self, message: str, thread_id: Optional[str] = None) -> ChatResponse:
+    async def handle_chat(self, message: str, thread_id: Optional[str] = None, auth_token: Optional[str] = None) -> ChatResponse:
         """Handle a general chat message.
         
         Args:
             message: The user's message
             thread_id: Optional thread ID for conversation continuity
+            auth_token: Optional authorization token for authenticated requests
             
         Returns:
             ChatResponse with the result
@@ -102,7 +104,7 @@ class RestaurantService:
                 thread_id = str(uuid.uuid4())
             
             # Parse and execute using CommandParser
-            parser_result = self.command_parser.parse_and_execute(message)
+            parser_result = self.command_parser.parse_and_execute(message, auth_token=auth_token)
             
             # Extract results
             command = parser_result.get('command')
@@ -153,6 +155,8 @@ class RestaurantService:
             return "recommendation"
         elif isinstance(command, InformationalCommand):
             return "informational"
+        elif isinstance(command, CollectionCommand):
+            return "collection"
         else:
             return "unknown"
     
