@@ -8,9 +8,9 @@ from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from typing import Optional
 
-from .models.requests import RestaurantQueryRequest, ChatRequest
+from .models.requests import RestaurantQueryRequest
 from .models.responses import (
-    RestaurantQueryResponse, ChatResponse, HealthResponse, ErrorResponse
+    RestaurantQueryResponse, HealthResponse, ErrorResponse
 )
 from .services.restaurant_service import RestaurantService
 from .core.middleware import setup_middleware
@@ -94,7 +94,6 @@ async def root():
         "endpoints": {
             "health": "/health",
             "query": "/query",
-            "chat": "/chat",
             "docs": "/docs"
         }
     }
@@ -115,19 +114,20 @@ async def query_restaurants(
     request: RestaurantQueryRequest,
     authorization: Optional[str] = Header(None)
 ):
-    """Query restaurants using natural language.
+    """Unified endpoint for restaurant queries and conversations.
     
-    This endpoint processes natural language queries like:
-    - "Best butter chicken spot in new delhi"
-    - "Find Italian restaurants in Mumbai"
-    - "Recommend a good restaurant for dinner"
+    This endpoint handles all types of interactions including:
+    - Restaurant search queries: "Best butter chicken spot in new delhi"
+    - General conversations: "I'm looking for a good restaurant for dinner"
+    - Collection creation: "create a collection" (requires authorization)
+    - Follow-up questions with conversation memory via thread_id
     
     Args:
-        request: Restaurant query request
+        request: Restaurant query request with query, optional location, and optional thread_id
         authorization: Optional Authorization header (e.g., "Bearer token")
         
     Returns:
-        Restaurant query response with results
+        Restaurant query response with results, AI message, and conversation thread_id
         
     Raises:
         HTTPException: If the service is not available
@@ -139,7 +139,7 @@ async def query_restaurants(
         )
     
     try:
-        logger.info(f"Processing restaurant query: '{request.query}'")
+        logger.info(f"Processing unified query: '{request.query}' with thread_id: {request.thread_id}")
         
         # Extract token from Authorization header
         auth_token = None
@@ -155,6 +155,7 @@ async def query_restaurants(
             restaurant_service.query(
                 query=request.query,
                 location=request.location,
+                thread_id=request.thread_id,
                 auth_token=auth_token
             ),
             timeout=25.0  # 25 second timeout (less than client timeout)
@@ -177,62 +178,7 @@ async def query_restaurants(
         )
 
 
-@app.post("/chat", response_model=ChatResponse)
-async def chat(
-    request: ChatRequest,
-    authorization: Optional[str] = Header(None)
-):
-    """Chat with the restaurant recommender AI.
-    
-    This endpoint provides a conversational interface for restaurant queries.
-    It can handle various types of messages including:
-    - Restaurant search queries
-    - General questions about restaurants
-    - Help requests
-    - Collection creation requests (requires authorization)
-    
-    Args:
-        request: Chat request with message and optional thread ID
-        authorization: Optional Authorization header (e.g., "Bearer token")
-        
-    Returns:
-        Chat response with AI-generated reply
-        
-    Raises:
-        HTTPException: If the service is not available
-    """
-    if not restaurant_service:
-        raise HTTPException(
-            status_code=503,
-            detail="Restaurant service not available"
-        )
-    
-    try:
-        logger.info(f"Processing chat message: '{request.message}'")
-        
-        # Extract token from Authorization header
-        auth_token = None
-        if authorization:
-            if authorization.startswith("Bearer "):
-                auth_token = authorization[7:]  # Remove "Bearer " prefix
-            else:
-                auth_token = authorization  # Use as-is if no Bearer prefix
-        
-        response = await restaurant_service.handle_chat(
-            message=request.message,
-            thread_id=request.thread_id,
-            auth_token=auth_token
-        )
-        
-        logger.info(f"Chat processed successfully: {response.success}")
-        return response
-        
-    except Exception as e:
-        logger.error(f"Error processing chat: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error processing chat: {str(e)}"
-        )
+
 
 
 

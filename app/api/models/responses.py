@@ -1,4 +1,3 @@
-"""Response models for the Restaurant API."""
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -18,27 +17,22 @@ class RestaurantInfo(BaseModel):
 
 
 class RestaurantQueryResponse(BaseModel):
-    """Response model for restaurant queries."""
+    """Unified response model for all restaurant queries and conversations."""
     
     success: bool = Field(..., description="Whether the query was successful")
+    message: str = Field(..., description="AI-generated response message")
     query: str = Field(..., description="The original query")
+    thread_id: Optional[str] = Field(None, description="Thread ID for conversation continuity")
     restaurants: Optional[List[RestaurantInfo]] = Field(
         None, 
         description="List of restaurants (if applicable)"
     )
     location: Optional[str] = Field(None, description="Location searched")
     cuisine: Optional[str] = Field(None, description="Cuisine type searched")
-    error: Optional[str] = Field(None, description="Error message if any")
-    timestamp: datetime = Field(default_factory=datetime.now, description="Response timestamp")
-
-
-class ChatResponse(BaseModel):
-    """Response model for chat queries."""
-    
-    success: bool = Field(..., description="Whether the request was successful")
-    message: str = Field(..., description="Response message")
-    thread_id: str = Field(..., description="Thread ID for conversation continuity")
     command_type: Optional[str] = Field(None, description="Type of command detected")
+    collection_prompt: Optional[str] = Field(None, description="Prompt asking user if they want to create a collection")
+    collection_created: Optional[bool] = Field(None, description="Whether a collection was created")
+    collection_result: Optional[Dict[str, Any]] = Field(None, description="Collection creation result details")
     error: Optional[str] = Field(None, description="Error message if any")
     timestamp: datetime = Field(default_factory=datetime.now, description="Response timestamp")
 

@@ -2,6 +2,7 @@
 import os
 import json
 import logging
+import asyncio
 from typing import Dict, List, Any, Union, Optional
 
 from dotenv import load_dotenv
@@ -150,12 +151,17 @@ class CommandParser:
             temperature=temperature,
             callbacks=[CommandParserLoggingHandler()],
             base_url=os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1"),
-            request_timeout=30,  # Add 30 second timeout
-            max_retries=1  # Limit retries to prevent long delays
+            request_timeout=10,  # Reduced to 10 seconds for parser
+            max_retries=0,  # No retries for faster parsing
+            streaming=False  # Disable streaming
         )
         self.server_url = server_url or os.getenv("RESTAURANT_SERVER_URL", "http://localhost:8000")
         self._functions = self._get_command_functions()
         self._tools = RestaurantTool.get_restaurant_tools(self.server_url)
+        
+        # Temporary storage for restaurants
+        self._temp_restaurants = []
+        
         logger.info(f"Command functions: {json.dumps(self._functions, indent=2)}")
 
     def _get_command_functions(self) -> List[Dict[str, Any]]:
@@ -284,6 +290,170 @@ class CommandParser:
             }
         ]
 
+    def add_to_temp_restaurants(self, restaurants: List[Dict[str, Any]]) -> None:
+        """Add restaurants to temporary storage.
+        
+        Args:
+            restaurants: List of restaurant dictionaries with id and other details
+        """
+        if restaurants:
+            for restaurant in restaurants:
+                if isinstance(restaurant, dict):
+                    # Handle both 'id' and '_id' fields
+                    restaurant_id = restaurant.get('id') or restaurant.get('_id')
+                    if restaurant_id:
+                        # Normalize the restaurant dict to always use 'id'
+                        normalized_restaurant = restaurant.copy()
+                        normalized_restaurant['id'] = restaurant_id
+                        
+                        # Check if restaurant is not already in temp storage
+                        if not any(r['id'] == restaurant_id for r in self._temp_restaurants):
+                            self._temp_restaurants.append(normalized_restaurant)
+                            restaurant_name = restaurant.get('name') or restaurant.get('title') or restaurant_id
+                            logger.info(f"Added restaurant {restaurant_name} to temporary storage")
+
+    def get_temp_restaurants(self) -> List[Dict[str, Any]]:
+        """Get restaurants from temporary storage.
+        
+        Returns:
+            List of restaurants in temporary storage
+        """
+        return self._temp_restaurants.copy()
+
+    def clear_temp_restaurants(self) -> None:
+        """Clear temporary restaurant storage."""
+        self._temp_restaurants.clear()
+        logger.info("Cleared temporary restaurant storage")
+
+    def _extract_restaurants_from_response(self, tool_response) -> List[Dict[str, Any]]:
+        """Extract restaurants from API response.
+        
+        Args:
+            tool_response: Response from restaurant search tool
+            
+        Returns:
+            List of restaurant dictionaries
+        """
+        try:
+            import json
+            if isinstance(tool_response, str):
+                response_data = json.loads(tool_response)
+            else:
+                response_data = tool_response
+            
+            restaurants = []
+            if isinstance(response_data, list):
+                # Response might be a list of objects, check if first item has restaurants
+                if response_data and isinstance(response_data[0], dict):
+                    first_item = response_data[0]
+                    if 'restaurants' in first_item and isinstance(first_item['restaurants'], list):
+                        restaurants = first_item['restaurants']
+            elif isinstance(response_data, dict):
+                # Check various possible keys where restaurants might be stored
+                for key in ['restaurants', 'results', 'data', 'items']:
+                    if key in response_data and isinstance(response_data[key], list):
+                        restaurants = response_data[key]
+                        break
+            
+            return restaurants
+            
+        except Exception as e:
+            logger.warning(f"Could not parse restaurants from response: {e}")
+            return []
+
+    def get_collection_prompt(self) -> str:
+        """Generate a prompt asking user if they want to create a collection.
+        
+        Returns:
+            String prompt for collection creation
+        """
+        if not self._temp_restaurants:
+            return ""
+        
+        restaurant_count = len(self._temp_restaurants)
+        restaurant_names = [r.get('name') or r.get('title') or f"Restaurant {r['id']}" for r in self._temp_restaurants[:3]]
+        
+        if restaurant_count > 3:
+            restaurant_list = ", ".join(restaurant_names) + f" and {restaurant_count - 3} more"
+        else:
+            restaurant_list = ", ".join(restaurant_names)
+        
+        return f"\nI found {restaurant_count} restaurants: {restaurant_list}. Would you like me to create a collection with these restaurants? (Type 'yes' to create collection, or continue with other queries)"
+
+    async def create_collection_with_temp_restaurants(
+        self, 
+        collection_name: str, 
+        collection_description: str,
+        auth_token: str,
+        is_public: bool = True,
+        tags: List[str] = None
+    ) -> Dict[str, Any]:
+        """Create a collection and add temporary restaurants to it.
+        
+        Args:
+            collection_name: Name for the collection
+            collection_description: Description for the collection
+            auth_token: Authorization token
+            is_public: Whether collection should be public
+            tags: Tags for the collection
+            
+        Returns:
+            Result of collection creation and restaurant addition
+        """
+        if not self._temp_restaurants:
+            return {"error": "No restaurants in temporary storage"}
+        
+        try:
+            from ..utils.restaurant_util import RestaurantAPIClient
+            api_client = RestaurantAPIClient(self.server_url)
+            
+            # Extract restaurant IDs from temporary storage
+            restaurant_ids = [restaurant['id'] for restaurant in self._temp_restaurants]
+            original_count = len(self._temp_restaurants)
+            
+            # Generate unique collection name if default name provided
+            import datetime
+            if collection_name == "My Restaurant Collection":
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+                # Try to generate a better name based on restaurant data
+                restaurant_names = [r.get('name', '') for r in self._temp_restaurants[:3]]
+                cuisines = set()
+                for r in self._temp_restaurants:
+                    cuisine = r.get('cuisine') or r.get('foodTags', [])
+                    if isinstance(cuisine, list):
+                        cuisines.update(cuisine)
+                    elif cuisine:
+                        cuisines.add(cuisine)
+                
+                if cuisines:
+                    main_cuisine = list(cuisines)[0] if cuisines else "Mixed"
+                    collection_name = f"{main_cuisine} Collection - {timestamp}"
+                else:
+                    collection_name = f"Restaurant Collection - {timestamp}"
+            
+            # Use the efficient create_collection_with_restaurants method
+            result = await api_client.create_collection_with_restaurants(
+                name=collection_name,
+                description=collection_description,
+                restaurant_ids=restaurant_ids,
+                is_public=is_public,
+                tags=tags or [],
+                auth_token=auth_token
+            )
+            
+            # Clear temporary storage after processing
+            self.clear_temp_restaurants()
+            
+            # Return consistent format with additional message
+            if result.get("success", False):
+                result["message"] = f"Created collection '{collection_name}' and added {result.get('successfully_added', 0)} restaurants"
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error creating collection with temp restaurants: {str(e)}")
+            return {"error": f"Failed to create collection: {str(e)}"}
+
     def parse_request(self, request: str) -> RestaurantCommand:
         """Parse a natural language request into a structured command.
         
@@ -311,7 +481,9 @@ Guidelines for parsing:
 5. Always try to extract location/place information from context
 6. Extract cuisine type, price preferences, and dietary restrictions when mentioned
 7. Be flexible with location - users might say "near me", "downtown", city names, etc.
-8. For collection creation, extract name, description, tags, and privacy settings from user input
+8. For collection creation, extract name, description, tags, privacy settings from user input
+
+Note: Restaurants found in searches will be temporarily stored and user will be prompted if they want to create a collection.
 
 Examples:
 - "Best butter chicken spot?" → search_restaurants with query="best butter chicken", place="near me" (if no location specified)
@@ -433,7 +605,8 @@ Extract all relevant information and choose the most appropriate function."""
             result = {
                 "command": command,
                 "tool_response": None,
-                "error": None
+                "error": None,
+                "collection_prompt": None
             }
             
             # Handle search commands with tools
@@ -441,10 +614,18 @@ Extract all relevant information and choose the most appropriate function."""
                 search_tool = self.get_restaurant_tool("search_restaurants")
                 if search_tool:
                     query = command.search_query
-                    result["tool_response"] = search_tool.func(
+                    tool_response = search_tool.func(
                         query=query.query,
                         place=query.place or "New Delhi"
                     )
+                    result["tool_response"] = tool_response
+                    
+                    # Parse the response and extract restaurants for temporary storage
+                    restaurants = self._extract_restaurants_from_response(tool_response)
+                    if restaurants:
+                        self.add_to_temp_restaurants(restaurants)
+                        result["collection_prompt"] = self.get_collection_prompt()
+                        
                 else:
                     result["error"] = "Search tool not available"
                     
@@ -453,10 +634,18 @@ Extract all relevant information and choose the most appropriate function."""
                 search_tool = self.get_restaurant_tool("search_restaurants")
                 if search_tool:
                     query = command.recommendation_query
-                    result["tool_response"] = search_tool.func(
+                    tool_response = search_tool.func(
                         query=query.query,
                         place=query.place or "New Delhi"
                     )
+                    result["tool_response"] = tool_response
+                    
+                    # Parse the response and extract restaurants for temporary storage
+                    restaurants = self._extract_restaurants_from_response(tool_response)
+                    if restaurants:
+                        self.add_to_temp_restaurants(restaurants)
+                        result["collection_prompt"] = self.get_collection_prompt()
+                        
                 else:
                     result["error"] = "Search tool not available"
                     
@@ -493,8 +682,83 @@ Extract all relevant information and choose the most appropriate function."""
             return {
                 "command": command,
                 "tool_response": None,
-                "error": str(e)
+                "error": str(e),
+                "collection_prompt": None
             }
+
+    def handle_collection_creation_request(
+        self, 
+        collection_name: str = None, 
+        collection_description: str = None,
+        auth_token: str = None,
+        is_public: bool = True,
+        tags: List[str] = None
+    ) -> Dict[str, Any]:
+        """Handle collection creation with temporary restaurants synchronously.
+        
+        Args:
+            collection_name: Name for the collection
+            collection_description: Description for the collection
+            auth_token: Authorization token
+            is_public: Whether collection should be public
+            tags: Tags for the collection
+            
+        Returns:
+            Result of collection creation and restaurant addition
+        """
+        try:
+            # Check if there's already an event loop running
+            try:
+                # If we're in an async context, get the current loop
+                loop = asyncio.get_running_loop()
+                # Create a new thread to run the async function
+                import concurrent.futures
+                
+                def run_in_thread():
+                    # Create a new event loop in this thread
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    try:
+                        result = new_loop.run_until_complete(
+                            self.create_collection_with_temp_restaurants(
+                                collection_name or "My Restaurant Collection",
+                                collection_description or "A curated collection of restaurants",
+                                auth_token,
+                                is_public,
+                                tags
+                            )
+                        )
+                        return result
+                    finally:
+                        new_loop.close()
+                
+                # Run in a separate thread
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(run_in_thread)
+                    result = future.result(timeout=60)  # Longer timeout for multiple operations
+                    
+            except RuntimeError:
+                # No event loop running, we can create one safely
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    result = loop.run_until_complete(
+                        self.create_collection_with_temp_restaurants(
+                            collection_name or "My Restaurant Collection",
+                            collection_description or "A curated collection of restaurants",
+                            auth_token,
+                            is_public,
+                            tags
+                        )
+                    )
+                finally:
+                    loop.close()
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error handling collection creation request: {str(e)}")
+            return {"error": f"Failed to create collection: {str(e)}"}
 
     def parse_and_execute(self, request: str, auth_token: Optional[str] = None) -> Dict[str, Any]:
         """Parse request and execute using tools.
@@ -507,6 +771,32 @@ Extract all relevant information and choose the most appropriate function."""
             Dictionary containing parsed command and tool execution results
         """
         try:
+            # Check if this is a "yes" response to create collection
+            if request.lower().strip() in ['yes', 'y', 'yeah', 'yep', 'sure', 'ok', 'okay']:
+                if self._temp_restaurants and auth_token:
+                    result = self.handle_collection_creation_request(auth_token=auth_token)
+                    # Add the success flag and other metadata for proper response handling
+                    result["command"] = None
+                    result["tool_response"] = None
+                    result["collection_prompt"] = None
+                    return result
+                elif self._temp_restaurants and not auth_token:
+                    return {
+                        "error": "Authorization token required for collection creation",
+                        "command": None,
+                        "tool_response": None,
+                        "collection_prompt": None,
+                        "success": False
+                    }
+                else:
+                    return {
+                        "error": "No restaurants available for collection creation",
+                        "command": None,
+                        "tool_response": None,
+                        "collection_prompt": None,
+                        "success": False
+                    }
+            
             # Parse the request first
             command = self.parse_request(request)
             
@@ -518,7 +808,8 @@ Extract all relevant information and choose the most appropriate function."""
             return {
                 "error": str(e),
                 "command": None,
-                "tool_response": None
+                "tool_response": None,
+                "collection_prompt": None
             }
 
     def _format_place_name(self, place: str) -> str:
@@ -556,3 +847,4 @@ Extract all relevant information and choose the most appropriate function."""
             "nashik": "Nashik"
         }
         return place_mappings.get(place_lower, place.title())
+

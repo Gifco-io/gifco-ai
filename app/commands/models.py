@@ -53,6 +53,7 @@ class CollectionCommand(RestaurantCommand):
     is_public: bool = True
     tags: List[str] = []
     auth_token: str
+    restaurant_ids: Optional[List[str]] = None
 
 
 class CommandParseError(Exception):

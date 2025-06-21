@@ -4,11 +4,11 @@ from typing import Optional
 
 
 class RestaurantQueryRequest(BaseModel):
-    """Request model for restaurant queries."""
+    """Unified request model for all restaurant queries and conversations."""
     
     query: str = Field(
         ..., 
-        description="The restaurant query (e.g., 'Best butter chicken spot in new delhi')",
+        description="The restaurant query, conversation message, or command (e.g., 'Best butter chicken spot in new delhi', 'create a collection')",
         example="Best butter chicken spot in new delhi"
     )
     location: Optional[str] = Field(
@@ -16,17 +16,7 @@ class RestaurantQueryRequest(BaseModel):
         description="Optional location override (if not specified in query)",
         example="New Delhi"
     )
-
-
-class ChatRequest(BaseModel):
-    """Request model for general chat queries."""
-    
-    message: str = Field(
-        ...,
-        description="The user's message or question",
-        example="I'm looking for a good restaurant for dinner"
-    )
     thread_id: Optional[str] = Field(
         None,
-        description="Optional thread ID for conversation continuity"
+        description="Optional thread ID for conversation continuity and memory"
     ) 

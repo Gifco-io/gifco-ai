@@ -25,6 +25,17 @@ class CollectionCreateInput(BaseModel):
     auth_token: str = Field(description="Authorization token for the API call")
 
 
+class CollectionWithRestaurantsInput(BaseModel):
+    """Input schema for creating a collection with restaurants."""
+    name: str = Field(description="Name of the collection")
+    description: str = Field(description="Description of the collection")
+    restaurant_ids: List[str] = Field(description="List of restaurant IDs to add to the collection")
+    is_public: bool = Field(default=True, description="Whether the collection is public or private")
+    tags: List[str] = Field(default=[], description="List of tags for the collection")
+    auth_token: str = Field(description="Authorization token for the API call")
+
+
+
 class RestaurantTool:
     """Tool for making restaurant API calls."""
     
@@ -62,6 +73,13 @@ class RestaurantTool:
                 func=api_tool.create_collection_sync,
                 args_schema=CollectionCreateInput
             ),
+            StructuredTool(
+                name="create_collection_with_restaurants",
+                description="Create a new restaurant collection and add specific restaurants to it. Use this tool when you have restaurant IDs and want to create a collection that contains those restaurants.",
+                func=api_tool.create_collection_with_restaurants_sync,
+                args_schema=CollectionWithRestaurantsInput
+            ),
+
             Tool(
                 name="get_restaurant_help",
                 description="Get help information about restaurant search capabilities",
@@ -74,4 +92,16 @@ class RestaurantTool:
 
     Just tell me what you're looking for and where!"""
             )
-        ] 
+        ]
+
+
+def get_restaurant_tools(server_url: str = None) -> List[Tool]:
+    """Get restaurant-related tools for the agent.
+    
+    Args:
+        server_url: Base URL for the restaurant API server
+    
+    Returns:
+        List of LangChain tools for restaurant operations.
+    """
+    return RestaurantTool.get_restaurant_tools(server_url) 

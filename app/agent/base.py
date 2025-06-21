@@ -166,40 +166,55 @@ class OpenAILoggingHandler(BaseCallbackHandler):
 
 # Create prompt template for the agent
 AGENT_PROMPT = PromptTemplate.from_template(
-    """You are a Restaurant Recommender, a helpful assistant that helps users find great restaurants. You help users by:
-    - Finding restaurants based on location, cuisine, and preferences
-    - Providing restaurant recommendations
-    - Searching for specific types of food or dining experiences
-    - Offering information about restaurants and dining options
-    
-    When users ask questions about restaurants, provide detailed and helpful responses that include:
-    1. Restaurant names and descriptions
-    2. Location and contact information if available
-    3. Cuisine types and specialties
-    4. Price ranges and dining atmosphere
-    5. Any relevant ratings or reviews
-    
-    For restaurant searches, always:
-    1. Consider the user's location preferences
-    2. Match their cuisine or food type requests
-    3. Take into account any dietary restrictions
-    4. Suggest appropriate price ranges
-    5. Provide multiple options when possible
-    
-    You have access to the following tools:
-    
+    """You are a Restaurant Recommender assistant. Help users find restaurants and create collections.
+
+    Available tools:
     {tools}
     
-    Use the following format:
+    Context (if available): {context}
     
-    Question: the input question you must answer
-    Thought: you should always think about what to do
-    Action: the action to take, should be one of [{tool_names}]
-    Action Input: the input to the action
-    Observation: the result of the action
-    ... (this Thought/Action/Action Input/Observation can repeat N times)
-    Thought: I now know the final answer
-    Final Answer: the final answer to the original input question
+    CRITICAL COLLECTION CREATION RULES:
+    1. If you see "Restaurant IDs for Collection:" in the context, you MUST use create_collection_with_restaurants
+    2. If the context contains restaurant IDs in brackets like ["id1", "id2"], use create_collection_with_restaurants
+    3. Only use create_collection for empty collections without restaurants
+    
+    Instructions:
+    1. For restaurant searches, use the search_restaurants tool
+    2. For creating collections WITH restaurants, use create_collection_with_restaurants tool
+    3. For creating empty collections, use the create_collection tool
+    4. Always check the context for restaurant IDs before creating collections
+    5. Extract collection names from user requests (look for "called", "named", etc.)
+    6. Format responses clearly and be helpful
+    
+    COLLECTION WITH RESTAURANTS: When you see restaurant IDs in the context:
+    - ALWAYS use create_collection_with_restaurants (never create_collection)
+    - Copy the restaurant_ids array EXACTLY from the context
+    - GENERATE A UNIQUE COLLECTION NAME based on the search context, cuisines, and locations
+    - If user specified a name, use it; otherwise create a descriptive name with timestamp
+    - Include ALL required fields: name, description, restaurant_ids, auth_token, is_public, tags
+    - Use the auth_token from the context
+    - Set is_public to true unless specified otherwise
+    - Add tags like ["user_created", "restaurant_search"]
+    
+    COLLECTION NAME EXAMPLES:
+    - "Italian Gems in Delhi - 20241220_1430"
+    - "Best Pizza Spots Found 20241220_1430"
+    - "Romantic Dinner Collection - 20241220_1430"
+    - "Budget Friendly Eats 20241220_1430"
+    
+    JSON FORMAT: Always use proper JSON format with double quotes for strings and arrays.
+    Do NOT wrap JSON in markdown code blocks or backticks. Provide raw JSON only.
+    Example: {{"name": "Collection Name", "description": "Description", "restaurant_ids": ["id1", "id2"], "auth_token": "token", "is_public": true, "tags": ["tag1"]}}
+    
+    Use this format:
+    
+    Question: {input}
+    Thought: I need to analyze what the user wants and check for context about restaurants
+    Action: [choose from: {tool_names}]
+    Action Input: [provide the required parameters as valid JSON with double quotes]
+    Observation: [result from the tool]
+    Thought: Now I can provide the answer based on the result
+    Final Answer: [clear, helpful response to the user]
     
     Begin!
     
@@ -242,9 +257,9 @@ class RestaurantRecommenderAgent:
     def __init__(
         self,
         model_name: str = "openai/gpt-4o-mini-2024-07-18",
-
         temperature: float = 0.7,
         command_parser: Optional[CommandParser] = None,
+        memory: Optional = None,
         # safety_validator: Optional[SafetyValidator] = None,
     ):
         """Initialize the RestaurantRecommender agent.
@@ -264,8 +279,9 @@ class RestaurantRecommenderAgent:
             temperature=temperature,
             callbacks=[OpenAILoggingHandler()],
             base_url=os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1"),
-            request_timeout=30,  # Add 30 second timeout
-            max_retries=1  # Limit retries to prevent long delays
+            request_timeout=15,  # Reduced timeout to 15 seconds
+            max_retries=0,  # No retries to prevent delays
+            streaming=False  # Disable streaming for more predictable responses
         )
         
         
@@ -274,6 +290,7 @@ class RestaurantRecommenderAgent:
         # self.validator = safety_validator or SafetyValidator()
         # self.operations = RestaurantOperations()
         self.command_parser = command_parser or CommandParser()
+        self.memory = memory  # Store memory instance for context
         
         # Create agent with tools
         self.tools = self._get_tools()
@@ -281,8 +298,12 @@ class RestaurantRecommenderAgent:
         self.agent_executor = AgentExecutor(
             agent=self.agent,
             tools=self.tools,
+            memory=self.memory,  # Add memory to agent executor
             handle_parsing_errors=True,  # Handle cases where LLM output includes both action and final answer
-            async_mode=True  # Enable async mode
+            max_iterations=5,  # Limit iterations to prevent infinite loops
+            max_execution_time=20,  # Maximum execution time in seconds
+            return_intermediate_steps=False,  # Don't return intermediate steps to reduce response size
+            verbose=True  # Enable verbose logging for debugging
         )
 
     def _get_tools(self):
@@ -312,7 +333,7 @@ class RestaurantRecommenderAgent:
         # return is_valid
 
     async def invoke(self, state: AgentState) -> AgentState:
-        """Invoke the agent.
+        """Invoke the agent with timeout protection.
 
         Args:
             state: Initial agent state
@@ -322,7 +343,7 @@ class RestaurantRecommenderAgent:
         """
         try:
             if not self._validate_request(state):
-                error_message = self.validator.get_last_error_message()
+                error_message = "Request validation failed"
                 state.output = error_message
                 return state
 
@@ -331,21 +352,47 @@ class RestaurantRecommenderAgent:
                 "input": state.messages[0]["content"],
                 "agent_scratchpad": "",
                 "tools": "\n".join(f"{tool.name}: {tool.description}" for tool in self.tools),
-                "tool_names": ", ".join(tool.name for tool in self.tools)
+                "tool_names": ", ".join(tool.name for tool in self.tools),
+                "thread_id": state.thread_id  # Include thread_id for memory context
             }
+            
+            # Add memory context if available
+            if self.memory:
+                try:
+                    memory_vars = self.memory.load_memory_variables(input_dict)
+                    # Add conversation history and context to the input
+                    if memory_vars.get("enhanced_context"):
+                        input_dict["context"] = memory_vars["enhanced_context"]
+                except Exception as e:
+                    logger.warning(f"Failed to load memory context: {e}")
+                    # Continue without memory context
 
-            # Run agent
-            response = await self.agent_executor.ainvoke(input_dict)
-            state.output = response["output"]
-            return state
+            logger.info(f"Invoking agent with input: {input_dict['input']}")
+            
+            # Run agent with timeout protection
+            import asyncio
+            try:
+                response = await asyncio.wait_for(
+                    self.agent_executor.ainvoke(input_dict), 
+                    timeout=20.0  # 20 second timeout
+                )
+                state.output = response.get("output", "No output generated")
+                logger.info(f"Agent response generated successfully")
+                return state
+            except asyncio.TimeoutError:
+                error_msg = "Agent execution timed out after 20 seconds"
+                logger.error(error_msg)
+                state.output = error_msg
+                return state
+                
         except Exception as e:
             error_msg = f"Error processing request: {str(e)}"
-            logger.error(error_msg)
+            logger.error(error_msg, exc_info=True)
             state.output = error_msg
             return state
 
     async def handle_request(self, request: str) -> AgentResponse:
-        """Handle a user request.
+        """Handle a user request using LLM-based agent.
         
         Args:
             request: User's request string
@@ -354,34 +401,39 @@ class RestaurantRecommenderAgent:
             AgentResponse containing the result
         """
         try:
-            # Parse request into command
-            command = self.command_parser.parse_request(request)
-            logger.info(f"Parsed command type: {type(command)}")
+            logger.info(f"Processing request with agent: {request}")
             
-            # Execute command
-            if isinstance(command, InformationalCommand) and command.topic == "help":
-                help_msg = """I can help you find great restaurants! I can:
-
-- Search for restaurants by location and cuisine
-- Find popular dining spots  
-- Recommend places based on your preferences
-- Provide restaurant details and information
-- Help with specific food cravings like "best butter chicken"
-
-Just ask me what you're looking for!"""
-                response = AgentResponse(success=True, message=help_msg)
-                response.parsed_command = command  # Store the parsed command
-                return response
+            # Create agent state
+            state = AgentState(
+                messages=[{"role": "user", "content": request}],
+                thread_id=str(uuid.uuid4())
+            )
             
-            response = await self.execute_command(command)
-            response.parsed_command = command  # Store the parsed command
-            return response
+            # Use the conversational agent instead of command parser
+            result_state = await self.invoke(state)
+            
+            if result_state.output:
+                # Try to parse the original request to get command info
+                try:
+                    command = self.command_parser.parse_request(request)
+                    response = AgentResponse(success=True, message=result_state.output)
+                    response.parsed_command = command
+                    return response
+                except:
+                    # If parsing fails, return generic response
+                    return AgentResponse(success=True, message=result_state.output)
+            else:
+                return AgentResponse(
+                    success=False,
+                    message="No response generated",
+                    error="Agent did not generate output"
+                )
             
         except Exception as e:
             logger.error(f"Error handling request: {str(e)}", exc_info=True)
             return AgentResponse(
                 success=False,
-                message=str(e),
+                message=f"Error processing request: {str(e)}",
                 error=str(e)
             )
 
