@@ -74,6 +74,7 @@ class RestaurantService:
                     message=error_message,
                     query=query,
                     thread_id=thread_id,
+                    response_count=0,
                     error=error,
                     timestamp=datetime.now()
                 )
@@ -88,19 +89,21 @@ class RestaurantService:
                     message=raw_message,
                     query=query,
                     thread_id=thread_id,
+                    response_count=0,
                     error=error,
                     timestamp=datetime.now()
                 )
             
             # Step 6: Generate AI response using LLM
-            if command_type in ['search', 'recommendation'] and restaurants:
+            if command_type in ['search', 'recommendation']:
                 ai_message = await self._generate_ai_message(query, restaurants, location)
             
-                # Store restaurants in memory for potential future use
-                self.memory.update_restaurant_search_context(
-                    thread_id, restaurants, query, 
-                    search_metadata={"location": location, "result_count": len(restaurants)}
-                )
+                # Store restaurants in memory for potential future use (only if we have results)
+                if restaurants and len(restaurants) > 0:
+                    self.memory.update_restaurant_search_context(
+                        thread_id, restaurants, query, 
+                        search_metadata={"location": location, "result_count": len(restaurants)}
+                    )
             else:           
                 # For info commands or other responses
                 ai_message = raw_message
@@ -116,6 +119,7 @@ class RestaurantService:
                 thread_id=thread_id,
                 command_type=command_type,
                 restaurants=restaurants,
+                response_count=len(restaurants) if restaurants else 0,
                 timestamp=datetime.now()
             )
             
@@ -131,6 +135,7 @@ class RestaurantService:
                 message=error_message,
                 query=query,
                 thread_id=thread_id or str(uuid.uuid4()),
+                response_count=0,
                 error=str(e),
                 timestamp=datetime.now()
             )
@@ -142,25 +147,12 @@ class RestaurantService:
         if not auth_token:
             logger.info("No auth token provided - not a collection request")
             return False
-            
-        # Check if query indicates collection creation from search results
-        # Include both explicit collection requests and affirmative responses
-        collection_keywords = [
-            # Explicit collection creation requests
-            'create collection', 'create a collection', 'make collection', 'save collection',
-            'make a collection', 'save as collection', 'create collection from these',
-            'save these restaurants', 'make collection from results',
-            # Affirmative responses to collection creation prompts
-            'yes', 'yeah', 'yep', 'sure', 'ok', 'okay', 'sounds good', 'go ahead',
-            'yes please', 'that sounds great', 'let\'s do it', 'create it'
-        ]
-        query_lower = query.lower().strip()
-        is_collection_request = any(keyword in query_lower for keyword in collection_keywords)
         
-        logger.info(f"Collection keywords check: is_collection_request={is_collection_request}, query_lower='{query_lower}'")
+        # Use LLM to classify if this is a collection creation request
+        is_collection_request = self._classify_collection_request(query, thread_id)
         
         if not is_collection_request:
-            logger.info("Query does not contain collection keywords")
+            logger.info("Query classified as NOT a collection request")
             return False
             
         # Check if we have stored restaurants
@@ -175,6 +167,67 @@ class RestaurantService:
             logger.info("❌ Collection request detected but no stored restaurants found")
             
         return has_restaurants
+
+    def _classify_collection_request(self, query: str, thread_id: str) -> bool:
+        """Use LLM to classify if a query is asking for collection creation."""
+        try:
+            # Get conversation context if available
+            conversation_context = ""
+            try:
+                conversation_history = self.memory.get_conversation_history(thread_id)
+                if conversation_history and len(conversation_history) > 0:
+                    # Get the last AI message for context
+                    for msg in reversed(conversation_history):
+                        if hasattr(msg, 'type') and msg.type == 'ai':
+                            conversation_context = f"Previous AI message: {msg.content[:200]}..."
+                            break
+            except Exception as e:
+                logger.warning(f"Could not get conversation context: {str(e)}")
+            
+            classification_prompt = f"""Analyze if the user's query is asking to create a restaurant collection.
+
+User Query: "{query}"
+{conversation_context}
+
+A collection creation request is when the user wants to:
+1. Create/make/save a collection of restaurants
+2. Save restaurant search results
+3. Organize restaurants into a group
+4. Respond affirmatively (yes/ok/sure) to a previous AI suggestion about creating a collection
+
+Return ONLY "YES" if this is a collection creation request, or "NO" if it's not.
+
+Examples:
+- "create a collection" → YES
+- "save these restaurants" → YES  
+- "make a collection from these results" → YES
+- "yes" (when previous AI asked about creating collection) → YES
+- "what are the opening hours?" → NO
+- "tell me about Italian cuisine" → NO
+- "find more restaurants" → NO
+- "yes I want more information about restaurants" → NO
+
+Answer:"""
+
+            from langchain_core.messages import SystemMessage, HumanMessage
+            
+            messages = [
+                SystemMessage(content="You are a classification assistant. Analyze queries to determine if they're asking for collection creation. Respond with only 'YES' or 'NO'."),
+                HumanMessage(content=classification_prompt)
+            ]
+            
+            response = self.agent.llm.invoke(messages)
+            classification = response.content.strip().upper()
+            
+            is_collection_request = classification == "YES"
+            logger.info(f"LLM classification for query '{query}': {classification} → {is_collection_request}")
+            
+            return is_collection_request
+            
+        except Exception as e:
+            logger.error(f"Error classifying collection request: {str(e)}")
+            # Fallback: if LLM fails, be conservative and return False
+            return False
 
     async def _handle_collection_creation_from_memory(self, query: str, thread_id: str, auth_token: str) -> RestaurantQueryResponse:
         """Handle collection creation using restaurants stored in memory."""
@@ -192,6 +245,7 @@ class RestaurantService:
                     message=error_message,
                     query=query,
                     thread_id=thread_id,
+                    response_count=0,
                     error="No stored restaurants",
                     timestamp=datetime.now()
                 )
@@ -244,6 +298,7 @@ class RestaurantService:
                     message=error_message,
                     query=query,
                     thread_id=thread_id,
+                    response_count=0,
                     error=result_data["error"],
                     timestamp=datetime.now()
                 )
@@ -269,6 +324,7 @@ class RestaurantService:
                 thread_id=thread_id,
                 command_type="collection",
                 collection_result=result_data,
+                response_count=len(restaurant_ids),
                 timestamp=datetime.now()
             )
             
@@ -282,6 +338,7 @@ class RestaurantService:
                 message=error_message,
                 query=query,
                 thread_id=thread_id,
+                response_count=0,
                 error=str(e),
                 timestamp=datetime.now()
             )
@@ -311,19 +368,18 @@ Cuisines Found: {', '.join(cuisines) if cuisines else 'Mixed'}
 Locations: {', '.join(locations) if locations else 'Various'}
 
 Generate a JSON response with:
-1. "name": A unique, descriptive collection name (include timestamp {timestamp} for uniqueness)
+1. "name": A unique, descriptive collection name
 2. "description": A detailed description of the collection
 3. "tags": An array of 3-5 relevant tags
 
 Requirements:
-- Name should be catchy and descriptive
-- Include the timestamp to ensure uniqueness
-- Description should mention the search context
+- Name should be catchy and descriptive and it should be short and concise
+- Description should mention the search context and it should be one short and concise sentence
 - Tags should be relevant to the cuisine/location/search
 
 Example format:
 {{
-  "name": "Best Italian Spots in Delhi - {timestamp}",
+  "name": "Italian Spots (Delhi)",
   "description": "A curated collection of top Italian restaurants found during our search in Delhi, featuring authentic cuisine and great ambiance.",
   "tags": ["italian", "delhi", "curated", "authentic", "dining"]
 }}"""
@@ -360,22 +416,42 @@ Example format:
             }
     
     async def _generate_ai_message(self, query: str, restaurants: Optional[List[RestaurantInfo]], location: Optional[str]) -> str:
-        """Generate a conversational AI message about the restaurants found."""
+        """Generate a conversational AI message about the restaurants found or no results."""
         logger.info(f"Generating AI message for query: '{query}', restaurants: {len(restaurants) if restaurants else 0}, location: {location}")
         
-        if not restaurants:
-            logger.warning(f"No restaurants found for query '{query}' in location '{location}', returning no-results message")
-            return f"I couldn't find any restaurants for '{query}' in {location or 'the specified area'}. You might want to try a different search or location."
+        if not restaurants or len(restaurants) == 0:
+            logger.info(f"No restaurants found for query '{query}' in location '{location}', generating no-results message")
             
-        logger.info(f"Found {len(restaurants)} restaurants: {[r.name for r in restaurants[:3]]}")
-        
-        # Create a more engaging message that proactively asks about collection creation
-        restaurant_names = [r.name for r in restaurants[:3]]  # Show first 3 restaurant names
-        name_preview = ", ".join(restaurant_names)
-        if len(restaurants) > 3:
-            name_preview += f" and {len(restaurants) - 3} more"
-        
-        ai_prompt = f"""Generate a friendly, conversational response about finding {len(restaurants)} restaurants including {name_preview}.
+            # Prompt for no results scenario
+            ai_prompt = f"""Generate a helpful and friendly response when no restaurants were found for the user's query.
+
+User Query: {query}
+Location: {location or 'not specified'}
+
+The response should:
+1. Acknowledge that no restaurants were found
+2. Be empathetic and helpful
+3. Suggest alternative search options (try different keywords, location, cuisine type)
+4. Keep it conversational and encouraging
+5. Keep it concise (2-3 sentences max)
+
+Example: "I couldn't find any restaurants matching your search for [query]. You might want to try searching with different keywords, a broader location, or a different cuisine type. I'm here to help you find the perfect place!"
+
+Keep the tone friendly and supportive."""
+
+            system_message = "You are a helpful restaurant assistant. Generate empathetic and helpful responses when no restaurants are found."
+            
+        else:
+            logger.info(f"Found {len(restaurants)} restaurants: {[r.name for r in restaurants[:3]]}")
+            
+            # Create a more engaging message that proactively asks about collection creation
+            restaurant_names = [r.name for r in restaurants[:3]]  # Show first 3 restaurant names
+            name_preview = ", ".join(restaurant_names)
+            if len(restaurants) > 3:
+                name_preview += f" and {len(restaurants) - 3} more"
+            
+            # Prompt for successful results scenario
+            ai_prompt = f"""Generate a friendly, conversational response about finding {len(restaurants)} restaurants including {name_preview}.
 
 The response should:
 1. Briefly mention the search results (don't list all restaurants)
@@ -388,11 +464,13 @@ Example: "Great! I found 5 amazing restaurants for you including [Restaurant Nam
 
 Keep the tone friendly and conversational."""
 
+            system_message = "You are a helpful restaurant assistant. Generate brief, friendly, and engaging responses that proactively suggest collection creation."
+
         # Use direct LLM call for message generation
         from langchain_core.messages import SystemMessage, HumanMessage
         
         messages = [
-            SystemMessage(content="You are a helpful restaurant assistant. Generate brief, friendly, and engaging responses that proactively suggest collection creation."),
+            SystemMessage(content=system_message),
             HumanMessage(content=ai_prompt)
         ]
                 

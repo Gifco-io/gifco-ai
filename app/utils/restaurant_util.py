@@ -82,38 +82,46 @@ class RestaurantAPIClient:
         except Exception as e:
             raise e
 
-    def extract_tags_from_query(self, query: str) -> List[str]:
-        """Extract relevant tags from user query using LLM.
+    def extract_tags_from_query(self, query: str) -> Dict[str, Any]:
+        """Extract relevant tags and place from user query using LLM.
         
         Args:
             query: User's search query
             
         Returns:
-            List of extracted tags
+            Dictionary with 'tags' and 'place' keys
         """
-        system_prompt = """You are a tag extraction system for restaurant search. Extract relevant tags from the user query that would be useful for finding restaurants.
+        system_prompt = """You are a tag and location extraction system for restaurant search. Extract relevant tags and location from the user query.
 
 Extract tags for:
 1. Food items, dishes, cuisines (e.g., "butter chicken", "pizza", "Italian", "Indian")
-2. Locations, areas, cities (e.g., "New Delhi", "Mumbai", "downtown")
-3. Restaurant types or categories (e.g., "fast food", "fine dining", "cafe")
-4. Special preferences (e.g., "vegetarian", "halal", "budget-friendly")
+2. Restaurant types or categories (e.g., "family restaurant", "fast food", "fine dining", "cafe")
+3. Special preferences (e.g., "vegetarian", "halal", "budget-friendly")
+
+Extract place/location separately:
+1. Cities, areas, locations (e.g., "New Delhi" -> "delhi", "Mumbai" -> "mumbai", "downtown Mumbai" -> "mumbai")
+2. Normalize location names to lowercase and remove common prefixes like "New"
 
 Important rules:
 - Extract specific dish names as single tags (e.g., "butter chicken" not ["butter", "chicken"])
-- Include location names as complete entities
+- Keep restaurant types as complete phrases (e.g., "family restaurant", "fine dining")
+- Extract location separately from tags
+- Normalize location names (e.g., "New Delhi" -> "delhi")
 - Keep tags concise and relevant for restaurant search
 - Return maximum 5 most relevant tags
-- Return tags as a JSON array of strings
+- Return response as JSON with "tags" array and "place" string
 
 Example:
 Query: "best butter chicken in New Delhi"
-Response: ["butter chicken", "New Delhi"]
+Response: {"tags": ["butter chicken"], "place": "delhi"}
 
-Query: "good pizza place near downtown Mumbai"
-Response: ["pizza", "downtown", "Mumbai"]"""
+Query: "good family restaurant serving pizza near downtown Mumbai"
+Response: {"tags": ["family restaurant", "pizza"], "place": "mumbai"}
 
-        user_message = f"Extract tags from this restaurant search query: {query}"
+Query: "best Italian restaurant in Bangalore"
+Response: {"tags": ["Italian"], "place": "bangalore"}"""
+
+        user_message = f"Extract tags and place from this restaurant search query: {query}"
 
         messages = [
             SystemMessage(content=system_prompt),
@@ -122,32 +130,53 @@ Response: ["pizza", "downtown", "Mumbai"]"""
 
         response = self.llm.invoke(messages)
         
-        # Parse the response to extract JSON array
+        # Parse the response to extract JSON
         response_text = response.content.strip()
         
-        # Extract JSON array from the response
-        start_idx = response_text.find('[')
-        end_idx = response_text.rfind(']') + 1
-        json_part = response_text[start_idx:end_idx]
-        tags = json.loads(json_part)
-        
-        return tags if isinstance(tags, list) else []
+        try:
+            # Extract JSON from the response
+            start_idx = response_text.find('{')
+            end_idx = response_text.rfind('}') + 1
+            json_part = response_text[start_idx:end_idx]
+            result = json.loads(json_part)
+            
+            # Ensure the result has the expected structure
+            if not isinstance(result, dict):
+                result = {"tags": [], "place": ""}
+            
+            # Ensure tags is a list and place is a string
+            result["tags"] = result.get("tags", []) if isinstance(result.get("tags"), list) else []
+            result["place"] = result.get("place", "") if isinstance(result.get("place"), str) else ""
+            
+            return result
+            
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(f"Failed to parse LLM response as JSON: {e}")
+            logger.error(f"Response text: {response_text}")
+            return {"tags": [], "place": ""}
 
-    async def search_restaurants_by_tags(self, tags: List[str]) -> Dict[str, Any]:
-        """Search for restaurants using the new tags endpoint.
+    async def search_restaurants_by_tags(self, tags: List[str], place: str = "") -> Dict[str, Any]:
+        """Search for restaurants using the tags endpoint with optional place filter.
         
         Args:
-            tags: List of tags to search for
+            tags: List of tags to search for (optional - can be empty)
+            place: Location/place to search in (optional - can be empty)
             
         Returns:
             API response as dictionary
         """
         try:
-            # Construct API URL for the new tags endpoint
+            # Construct API URL for the tags endpoint
             api_url = f"{self.server_url}/api/restaurants/search/tags"
             
-            # Prepare request body
-            request_body = {"tags": tags}
+            # Prepare request body - only include fields that have values
+            request_body = {}
+            
+            if tags and len(tags) > 0:
+                request_body["tags"] = tags
+                
+            if place and place.strip():
+                request_body["place"] = place.strip()
             
             # Prepare headers
             headers = {"Content-Type": "application/json"}
@@ -157,7 +186,7 @@ Response: ["pizza", "downtown", "Mumbai"]"""
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     api_url, 
-                    json=request_body, 
+                    json=request_body if request_body else None, 
                     headers=headers
                 ) as response:
                     if response.status == 200:
@@ -185,21 +214,24 @@ Response: ["pizza", "downtown", "Mumbai"]"""
             return {"error": error_msg}
 
     def search_restaurants_by_tags_sync(self, query: str) -> str:
-        """Search for restaurants by tags (synchronous wrapper).
+        """Search for restaurants by tags and place (synchronous wrapper).
         
         Args:
-            query: The search query to extract tags from and search restaurants
+            query: The search query to extract tags and place from and search restaurants
             
         Returns:
             JSON string with restaurant search results
         """
         try:
-            # Extract tags from the query using LLM
-            tags = self.extract_tags_from_query(query)
-            logger.info(f"Extracted tags from query '{query}': {tags}")
+            # Extract tags and place from the query using LLM
+            extraction_result = self.extract_tags_from_query(query)
+            tags = extraction_result.get("tags", [])
+            place = extraction_result.get("place", "")
+            
+            logger.info(f"Extracted from query '{query}': tags={tags}, place='{place}'")
             
             # Use the utility function to run async search
-            result = self._run_async_in_sync(self.search_restaurants_by_tags, tags)
+            result = self._run_async_in_sync(self.search_restaurants_by_tags, tags, place)
             return json.dumps(result, indent=2)
             
         except Exception as e:
