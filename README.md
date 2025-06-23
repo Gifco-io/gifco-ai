@@ -336,3 +336,579 @@ For production deployment:
 ## 📄 License
 
 This project is licensed under the MIT License.
+
+# vanice-ai
+
+API KEY: RSxMcst7d5TS48cgR3dRWL3_AU5qZ68a-HnOj5VZte
+OPENAI_API_KEY=h6IyrxVtjX1ThU_Gya6-4XWZlsm1WuVNi4iubngt4z
+LLM_MODEL
+
+```
+{
+    "data": [
+        {
+            "created": 1742262554,
+            "id": "venice-uncensored",
+            "model_spec": {
+                "pricing": {
+                    "input": {
+                        "usd": 0.5,
+                        "vcu": 5
+                    },
+                    "output": {
+                        "usd": 2,
+                        "vcu": 20
+                    }
+                },
+                "availableContextTokens": 32768,
+                "capabilities": {
+                    "optimizedForCode": false,
+                    "quantization": "fp16",
+                    "supportsFunctionCalling": false,
+                    "supportsReasoning": false,
+                    "supportsResponseSchema": true,
+                    "supportsVision": false,
+                    "supportsWebSearch": true,
+                    "supportsLogProbs": true
+                },
+                "constraints": {
+                    "temperature": {
+                        "default": 0.3
+                    },
+                    "top_p": {
+                        "default": 1
+                    }
+                },
+                "name": "Venice Uncensored",
+                "modelSource": "https://huggingface.co/cognitivecomputations/Dolphin-Mistral-24B-Venice-Edition",
+                "offline": false,
+                "traits": []
+            },
+            "object": "model",
+            "owned_by": "venice.ai",
+            "type": "text"
+        },
+        {
+            "created": 1741218077,
+            "id": "qwen-2.5-qwq-32b",
+            "model_spec": {
+                "pricing": {
+                    "input": {
+                        "usd": 0.5,
+                        "vcu": 5
+                    },
+                    "output": {
+                        "usd": 2,
+                        "vcu": 20
+                    }
+                },
+                "availableContextTokens": 32768,
+                "capabilities": {
+                    "optimizedForCode": false,
+                    "quantization": "fp8",
+                    "supportsFunctionCalling": false,
+                    "supportsReasoning": true,
+                    "supportsResponseSchema": true,
+                    "supportsVision": false,
+                    "supportsWebSearch": true,
+                    "supportsLogProbs": true
+                },
+                "constraints": {
+                    "temperature": {
+                        "default": 0.6
+                    },
+                    "top_p": {
+                        "default": 0.95
+                    }
+                },
+                "name": "Venice Reasoning",
+                "modelSource": "https://huggingface.co/Qwen/QwQ-32B",
+                "offline": false,
+                "traits": []
+            },
+            "object": "model",
+            "owned_by": "venice.ai",
+            "type": "text"
+        },
+        {
+            "created": 1745903059,
+            "id": "qwen3-4b",
+            "model_spec": {
+                "pricing": {
+                    "input": {
+                        "usd": 0.15,
+                        "vcu": 1.5
+                    },
+                    "output": {
+                        "usd": 0.6,
+                        "vcu": 6
+                    }
+                },
+                "availableContextTokens": 32768,
+                "capabilities": {
+                    "optimizedForCode": false,
+                    "quantization": "fp8",
+                    "supportsFunctionCalling": true,
+                    "supportsReasoning": true,
+                    "supportsResponseSchema": true,
+                    "supportsVision": false,
+                    "supportsWebSearch": true,
+                    "supportsLogProbs": true
+                },
+                "constraints": {
+                    "temperature": {
+                        "default": 0.6
+                    },
+                    "top_p": {
+                        "default": 0.95
+                    }
+                },
+                "name": "Venice Small",
+                "modelSource": "https://huggingface.co/Qwen/Qwen3-4B",
+                "offline": false,
+                "traits": []
+            },
+            "object": "model",
+            "owned_by": "venice.ai",
+            "type": "text"
+        },
+        {
+            "created": 1742262554,
+            "id": "mistral-31-24b",
+            "model_spec": {
+                "pricing": {
+                    "input": {
+                        "usd": 0.5,
+                        "vcu": 5
+                    },
+                    "output": {
+                        "usd": 2,
+                        "vcu": 20
+                    }
+                },
+                "availableContextTokens": 131072,
+                "capabilities": {
+                    "optimizedForCode": false,
+                    "quantization": "fp16",
+                    "supportsFunctionCalling": true,
+                    "supportsReasoning": false,
+                    "supportsResponseSchema": true,
+                    "supportsVision": true,
+                    "supportsWebSearch": true,
+                    "supportsLogProbs": false
+                },
+                "constraints": {
+                    "temperature": {
+                        "default": 0.15
+                    },
+                    "top_p": {
+                        "default": 1
+                    }
+                },
+                "name": "Venice Medium",
+                "modelSource": "https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503",
+                "offline": false,
+                "traits": [
+                    "default_vision"
+                ]
+            },
+            "object": "model",
+            "owned_by": "venice.ai",
+            "type": "text"
+        },
+        {
+            "created": 1745903059,
+            "id": "qwen3-235b",
+            "model_spec": {
+                "pricing": {
+                    "input": {
+                        "usd": 1.5,
+                        "vcu": 15
+                    },
+                    "output": {
+                        "usd": 6,
+                        "vcu": 60
+                    }
+                },
+                "availableContextTokens": 131072,
+                "capabilities": {
+                    "optimizedForCode": false,
+                    "quantization": "fp8",
+                    "supportsFunctionCalling": true,
+                    "supportsReasoning": true,
+                    "supportsResponseSchema": true,
+                    "supportsVision": false,
+                    "supportsWebSearch": true,
+                    "supportsLogProbs": true
+                },
+                "constraints": {
+                    "temperature": {
+                        "default": 0.6
+                    },
+                    "top_p": {
+                        "default": 0.95
+                    }
+                },
+                "name": "Venice Large",
+                "modelSource": "https://huggingface.co/Qwen/Qwen3-235B-A22B",
+                "offline": false,
+                "traits": []
+            },
+            "object": "model",
+            "owned_by": "venice.ai",
+            "type": "text"
+        },
+        {
+            "created": 1727966436,
+            "id": "llama-3.2-3b",
+            "model_spec": {
+                "pricing": {
+                    "input": {
+                        "usd": 0.15,
+                        "vcu": 1.5
+                    },
+                    "output": {
+                        "usd": 0.6,
+                        "vcu": 6
+                    }
+                },
+                "availableContextTokens": 131072,
+                "capabilities": {
+                    "optimizedForCode": false,
+                    "quantization": "fp16",
+                    "supportsFunctionCalling": true,
+                    "supportsReasoning": false,
+                    "supportsResponseSchema": true,
+                    "supportsVision": false,
+                    "supportsWebSearch": true,
+                    "supportsLogProbs": true
+                },
+                "constraints": {
+                    "temperature": {
+                        "default": 0.6
+                    },
+                    "top_p": {
+                        "default": 0.95
+                    }
+                },
+                "name": "Llama 3.2 3B",
+                "modelSource": "https://huggingface.co/meta-llama/Llama-3.2-3B",
+                "offline": false,
+                "traits": [
+                    "fastest"
+                ]
+            },
+            "object": "model",
+            "owned_by": "venice.ai",
+            "type": "text"
+        },
+        {
+            "created": 1733768349,
+            "id": "llama-3.3-70b",
+            "model_spec": {
+                "pricing": {
+                    "input": {
+                        "usd": 0.7,
+                        "vcu": 7
+                    },
+                    "output": {
+                        "usd": 2.8,
+                        "vcu": 28
+                    }
+                },
+                "availableContextTokens": 65536,
+                "capabilities": {
+                    "optimizedForCode": false,
+                    "quantization": "fp8",
+                    "supportsFunctionCalling": true,
+                    "supportsReasoning": false,
+                    "supportsResponseSchema": false,
+                    "supportsVision": false,
+                    "supportsWebSearch": true,
+                    "supportsLogProbs": false
+                },
+                "constraints": {
+                    "temperature": {
+                        "default": 0.6
+                    },
+                    "top_p": {
+                        "default": 0.95
+                    }
+                },
+                "name": "Llama 3.3 70B",
+                "modelSource": "https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct",
+                "offline": false,
+                "traits": [
+                    "function_calling_default",
+                    "default"
+                ]
+            },
+            "object": "model",
+            "owned_by": "venice.ai",
+            "type": "text"
+        },
+        {
+            "created": 1730396371,
+            "id": "llama-3.1-405b",
+            "model_spec": {
+                "pricing": {
+                    "input": {
+                        "usd": 1.5,
+                        "vcu": 15
+                    },
+                    "output": {
+                        "usd": 6,
+                        "vcu": 60
+                    }
+                },
+                "availableContextTokens": 65536,
+                "capabilities": {
+                    "optimizedForCode": false,
+                    "quantization": "fp8",
+                    "supportsFunctionCalling": false,
+                    "supportsReasoning": false,
+                    "supportsResponseSchema": true,
+                    "supportsVision": false,
+                    "supportsWebSearch": true,
+                    "supportsLogProbs": true
+                },
+                "constraints": {
+                    "temperature": {
+                        "default": 0.6
+                    },
+                    "top_p": {
+                        "default": 0.95
+                    }
+                },
+                "name": "Llama 3.1 405B",
+                "modelSource": "https://huggingface.co/meta-llama/Meta-Llama-3.1-405B-Instruct",
+                "offline": false,
+                "traits": [
+                    "most_intelligent"
+                ]
+            },
+            "object": "model",
+            "owned_by": "venice.ai",
+            "type": "text"
+        },
+        {
+            "created": 1726869022,
+            "id": "dolphin-2.9.2-qwen2-72b",
+            "model_spec": {
+                "pricing": {
+                    "input": {
+                        "usd": 0.7,
+                        "vcu": 7
+                    },
+                    "output": {
+                        "usd": 2.8,
+                        "vcu": 28
+                    }
+                },
+                "availableContextTokens": 32768,
+                "capabilities": {
+                    "optimizedForCode": false,
+                    "quantization": "fp8",
+                    "supportsFunctionCalling": false,
+                    "supportsReasoning": false,
+                    "supportsResponseSchema": true,
+                    "supportsVision": false,
+                    "supportsWebSearch": true,
+                    "supportsLogProbs": true
+                },
+                "constraints": {
+                    "temperature": {
+                        "default": 0.7
+                    },
+                    "top_p": {
+                        "default": 0.8
+                    }
+                },
+                "name": "Dolphin 72B",
+                "modelSource": "https://huggingface.co/cognitivecomputations/dolphin-2.9.2-qwen2-72b",
+                "offline": false,
+                "traits": [
+                    "most_uncensored"
+                ]
+            },
+            "object": "model",
+            "owned_by": "venice.ai",
+            "type": "text"
+        },
+        {
+            "created": 1739074852,
+            "id": "qwen-2.5-vl",
+            "model_spec": {
+                "pricing": {
+                    "input": {
+                        "usd": 0.7,
+                        "vcu": 7
+                    },
+                    "output": {
+                        "usd": 2.8,
+                        "vcu": 28
+                    }
+                },
+                "availableContextTokens": 32768,
+                "capabilities": {
+                    "optimizedForCode": false,
+                    "quantization": "fp8",
+                    "supportsFunctionCalling": false,
+                    "supportsReasoning": false,
+                    "supportsResponseSchema": true,
+                    "supportsVision": true,
+                    "supportsWebSearch": true,
+                    "supportsLogProbs": true
+                },
+                "constraints": {
+                    "temperature": {
+                        "default": 0.7
+                    },
+                    "top_p": {
+                        "default": 0.8
+                    }
+                },
+                "name": "Qwen 2.5 VL 72B",
+                "modelSource": "https://huggingface.co/Qwen/Qwen2.5-VL-72B-Instruct",
+                "offline": false,
+                "traits": []
+            },
+            "object": "model",
+            "owned_by": "venice.ai",
+            "type": "text"
+        },
+        {
+            "created": 1731628653,
+            "id": "qwen-2.5-coder-32b",
+            "model_spec": {
+                "pricing": {
+                    "input": {
+                        "usd": 0.5,
+                        "vcu": 5
+                    },
+                    "output": {
+                        "usd": 2,
+                        "vcu": 20
+                    }
+                },
+                "availableContextTokens": 32768,
+                "capabilities": {
+                    "optimizedForCode": true,
+                    "quantization": "fp8",
+                    "supportsFunctionCalling": false,
+                    "supportsReasoning": false,
+                    "supportsResponseSchema": false,
+                    "supportsVision": false,
+                    "supportsWebSearch": false,
+                    "supportsLogProbs": true
+                },
+                "constraints": {
+                    "temperature": {
+                        "default": 0.7
+                    },
+                    "top_p": {
+                        "default": 0.8
+                    }
+                },
+                "name": "Qwen 2.5 Coder 32B",
+                "modelSource": "https://huggingface.co/Qwen/Qwen2.5-Coder-32B-Instruct-GGUF",
+                "offline": false,
+                "traits": [
+                    "default_code"
+                ]
+            },
+            "object": "model",
+            "owned_by": "venice.ai",
+            "type": "text"
+        },
+        {
+            "created": 1738690625,
+            "id": "deepseek-r1-671b",
+            "model_spec": {
+                "pricing": {
+                    "input": {
+                        "usd": 3.5,
+                        "vcu": 35
+                    },
+                    "output": {
+                        "usd": 14,
+                        "vcu": 140
+                    }
+                },
+                "availableContextTokens": 131072,
+                "capabilities": {
+                    "optimizedForCode": false,
+                    "quantization": "fp8",
+                    "supportsFunctionCalling": false,
+                    "supportsReasoning": true,
+                    "supportsResponseSchema": true,
+                    "supportsVision": false,
+                    "supportsWebSearch": true,
+                    "supportsLogProbs": false
+                },
+                "constraints": {
+                    "temperature": {
+                        "default": 0.6
+                    },
+                    "top_p": {
+                        "default": 0.95
+                    }
+                },
+                "name": "DeepSeek R1 671B",
+                "modelSource": "https://huggingface.co/deepseek-ai/DeepSeek-R1",
+                "offline": false,
+                "traits": [
+                    "default_reasoning"
+                ]
+            },
+            "object": "model",
+            "owned_by": "venice.ai",
+            "type": "text"
+        },
+        {
+            "created": 1740253117,
+            "id": "deepseek-coder-v2-lite",
+            "model_spec": {
+                "pricing": {
+                    "input": {
+                        "usd": 0.5,
+                        "vcu": 5
+                    },
+                    "output": {
+                        "usd": 2,
+                        "vcu": 20
+                    }
+                },
+                "availableContextTokens": 131072,
+                "capabilities": {
+                    "optimizedForCode": true,
+                    "quantization": "fp16",
+                    "supportsFunctionCalling": false,
+                    "supportsReasoning": false,
+                    "supportsResponseSchema": true,
+                    "supportsVision": false,
+                    "supportsWebSearch": false,
+                    "supportsLogProbs": false
+                },
+                "constraints": {
+                    "temperature": {
+                        "default": 0.6
+                    },
+                    "top_p": {
+                        "default": 0.95
+                    }
+                },
+                "name": "DeepSeek Coder V2 Lite",
+                "modelSource": "https://huggingface.co/deepseek-ai/deepseek-coder-v2-lite-Instruct",
+                "offline": false,
+                "traits": []
+            },
+            "object": "model",
+            "owned_by": "venice.ai",
+            "type": "text"
+        }
+    ],
+    "object": "list",
+    "type": "text"
+}
+```

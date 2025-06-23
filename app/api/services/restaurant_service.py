@@ -31,429 +31,468 @@ class RestaurantService:
         logger.info(f"RestaurantService initialized with server URL: {server_url}")
     
     async def query(self, query: str, location: Optional[str] = None, thread_id: Optional[str] = None, auth_token: Optional[str] = None) -> RestaurantQueryResponse:
-        """Process a unified query that can handle both restaurant search and conversational interactions.
+        """Process a restaurant query and return a response.
         
         Args:
-            query: The query string (restaurant search, conversation, or command)
-            location: Optional location override
-            thread_id: Optional thread ID for conversation continuity
-            auth_token: Optional authorization token for authenticated requests
+            query: Natural language query from user
+            location: Optional location filter
+            thread_id: Thread ID for conversation context
+            auth_token: Optional authentication token for collection operations
             
         Returns:
-            RestaurantQueryResponse with restaurants list and AI message
+            RestaurantQueryResponse with processed results
         """
         try:
-            logger.info(f"Processing unified query: '{query}' with location: {location}, thread_id: {thread_id}")
+            logger.info(f"Processing query: '{query}', location: {location}, thread_id: {thread_id}")
             
-            # Generate thread ID if not provided
+            # Step 1: Set up thread context
             if not thread_id:
                 thread_id = str(uuid.uuid4())
-            
-            # Add user message to conversation memory using LangChain memory
+                
+            # Add user message to memory
             self.memory.add_user_message(thread_id, query)
             
-            # Get conversation context for enhanced processing
-            last_restaurants, last_query = self.memory.get_last_restaurants(thread_id)
+            # Step 2: Check if this is a collection creation request with stored restaurants
+            if self._is_collection_request_with_stored_restaurants(query, thread_id, auth_token):
+                return await self._handle_collection_creation_from_memory(query, thread_id, auth_token)
             
-            # Check if this is a collection creation request with previous restaurants
-            if last_restaurants and self._is_collection_request(query):
-                logger.info(f"Detected collection creation request with {len(last_restaurants)} previous restaurants from query: '{last_query}'")
-                logger.info(f"Sample restaurants: {[r.name for r in last_restaurants[:3]]}")
-                
-                # Handle collection creation through conversational agent
-                # Use the new memory system to get enhanced context
-                enhanced_message = self.memory.get_context_for_agent(thread_id, query, auth_token)
-                logger.info(f"Enhanced message preview: {enhanced_message[:200]}...")
-                
-                # Process with agent
-                try:
-                    agent_response = await asyncio.wait_for(
-                        self.agent.handle_request(enhanced_message),
-                        timeout=20.0
-                    )
-                    
-                    # Check if agent failed with validation errors - use command parser as fallback
-                    if not agent_response.success and ("validation error" in agent_response.message.lower() or "field required" in agent_response.message.lower()):
-                        logger.info("Agent validation error detected, falling back to command parser")
-                        raise Exception("Agent validation error")
-                    
-                    # Add assistant response to memory using LangChain memory
-                    self.memory.add_ai_message(thread_id, agent_response.message)
-                    
-                    return RestaurantQueryResponse(
-                        success=agent_response.success,
-                        message=agent_response.message,
-                        query=query,
-                        thread_id=thread_id,
-                        command_type="collection",
-                        error=agent_response.error if not agent_response.success else None,
-                        timestamp=datetime.now()
-                    )
-                    
-                except asyncio.TimeoutError:
-                    logger.error("Collection creation timed out")
-                    return RestaurantQueryResponse(
-                        success=False,
-                        message="Sorry, the collection creation took too long. Please try again.",
-                        query=query,
-                        thread_id=thread_id,
-                        error="Request timeout",
-                        timestamp=datetime.now()
-                    )
-                except Exception as e:
-                    logger.info(f"Agent failed with: {str(e)}, falling back to command parser")
-                    
-                    # Use command parser as fallback for collection creation
-                    try:
-                        parser_result = self.command_parser.parse_and_execute(enhanced_message, auth_token=auth_token)
-                        
-                        if parser_result.get('success', False):
-                            logger.info("Command parser successfully created collection")
-                            success_message = "✅ Successfully created your restaurant collection!"
-                            
-                            # Add assistant response to memory using LangChain memory
-                            self.memory.add_ai_message(thread_id, success_message)
-                            
-                            return RestaurantQueryResponse(
-                                success=True,
-                                message=success_message,
-                                query=query,
-                                thread_id=thread_id,
-                                command_type="collection",
-                                timestamp=datetime.now()
-                            )
-                        else:
-                            error_msg = parser_result.get('error', 'Unknown error')
-                            logger.error(f"Command parser also failed: {error_msg}")
-                            
-                            return RestaurantQueryResponse(
-                                success=False,
-                                message=f"❌ Failed to create collection: {error_msg}",
-                                query=query,
-                                thread_id=thread_id,
-                                command_type="collection",
-                                error=error_msg,
-                                timestamp=datetime.now()
-                            )
-                    except Exception as parser_error:
-                        logger.error(f"Command parser fallback failed: {str(parser_error)}")
-                        return RestaurantQueryResponse(
-                            success=False,
-                            message="❌ Failed to create collection due to technical issues. Please try again.",
-                            query=query,
-                            thread_id=thread_id,
-                            command_type="collection",
-                            error=str(parser_error),
-                            timestamp=datetime.now()
-                        )
+            # Step 3: Parse query using the command parser
+            parse_result = self.command_parser.parse_and_execute(query, auth_token=auth_token)
+            command = parse_result["command"]
+            tool_response = parse_result["tool_response"]
+            error = parse_result["error"]
             
-            # For regular restaurant queries, enhance with location if provided
-            enhanced_query = f"{query} in {location}" if location and location.lower() not in query.lower() else query
+            command_type = self._get_command_type(command)
+            logger.info(f"Parsed command type: {command_type}")
             
-            # Parse and execute using CommandParser to get actual restaurant data
-            parser_result = self.command_parser.parse_and_execute(enhanced_query, auth_token=auth_token)
-            
-            # Handle parser errors
-            if parser_result.get('error'):
+            # Step 4: Handle parsing errors
+            if error:
+                error_message = f"Error processing request: {error}"
+                self.memory.add_ai_message(thread_id, error_message)
                 return RestaurantQueryResponse(
                     success=False,
-                    message=f"Failed to process query: {parser_result['error']}",
+                    message=error_message,
                     query=query,
                     thread_id=thread_id,
-                    error=parser_result['error'], 
+                    response_count=0,
+                    error=error,
                     timestamp=datetime.now()
                 )
             
-            # Extract results
-            command = parser_result.get('command')
-            tool_response = parser_result.get('tool_response')
-            collection_prompt = parser_result.get('collection_prompt')
-            
-            # Check if this is a collection creation result
-            if parser_result.get('collection_id') or parser_result.get('successfully_added') is not None:
-                # This is a collection creation result
-                success = parser_result.get('success', False)
-                if success:
-                    collection_name = parser_result.get('collection', {}).get('name', 'Collection')
-                    added_count = parser_result.get('successfully_added', 0)
-                    total_count = parser_result.get('total_restaurants', 0)
-                    
-                    ai_message = f"✅ Successfully created collection '{collection_name}' with {added_count} out of {total_count} restaurants!"
-                    self.memory.add_ai_message(thread_id, ai_message)
-                    
-                    return RestaurantQueryResponse(
-                        success=True,
-                        message=ai_message,
-                        query=query,
-                        thread_id=thread_id,
-                        collection_created=True,
-                        collection_result=parser_result,
-                        timestamp=datetime.now()
-                    )
-                else:
-                    error_msg = parser_result.get('error', 'Unknown error')
-                    return RestaurantQueryResponse(
-                        success=False,
-                        message=f"❌ Failed to create collection: {error_msg}",
-                        query=query,
-                        thread_id=thread_id,
-                        error=error_msg,
-                        timestamp=datetime.now()
-                    )
-            
-            # Get command type and query info
-            command_type = self._get_command_type(command)
-            parsed_location, parsed_cuisine = self._extract_query_info(command)
-            
-            # Process tool response to get restaurants
+            # Step 5: Process tool response
             success, raw_message, error, restaurants = self._process_tool_response(tool_response, command_type)
             
             if not success:
+                self.memory.add_ai_message(thread_id, raw_message)
                 return RestaurantQueryResponse(
                     success=False,
                     message=raw_message,
                     query=query,
                     thread_id=thread_id,
+                    response_count=0,
                     error=error,
                     timestamp=datetime.now()
                 )
             
-            # Generate AI message using the conversational agent
-            ai_message = await self._generate_ai_message(query, restaurants, parsed_location)
+            # Step 6: Generate AI response using LLM
+            if command_type in ['search', 'recommendation']:
+                ai_message = await self._generate_ai_message(query, restaurants, location)
             
-            # Store restaurants in memory for potential collection creation using enhanced memory
-            if restaurants and command_type in ['search', 'recommendation']:
-                self.memory.update_restaurant_search_context(
-                    thread_id, restaurants, query, 
-                    search_metadata={"location": location or parsed_location, "result_count": len(restaurants)}
-                )
-                
-                # If there's a collection prompt from parser, use it instead of generating our own
-                if collection_prompt:
-                    ai_message += f"\n\n{collection_prompt}"
-                else:
-                    # Add suggestion to create collection
-                    ai_message += "\n\n💡 *Would you like me to create a collection from these restaurants? Just say 'create a collection' and I'll save them for you!*"
+                # Store restaurants in memory for potential future use (only if we have results)
+                if restaurants and len(restaurants) > 0:
+                    self.memory.update_restaurant_search_context(
+                        thread_id, restaurants, query, 
+                        search_metadata={"location": location, "result_count": len(restaurants)}
+                    )
+            else:           
+                # For info commands or other responses
+                ai_message = raw_message
             
-            # Add assistant message to memory using LangChain memory
+            # Step 7: Add AI response to memory
             self.memory.add_ai_message(thread_id, ai_message)
             
+            # Step 8: Return response
             return RestaurantQueryResponse(
                 success=True,
-                message=ai_message,  # AI-generated conversational message
+                message=ai_message,
                 query=query,
                 thread_id=thread_id,
-                restaurants=restaurants,  # Structured list of restaurant objects
-                location=location or parsed_location,
-                cuisine=parsed_cuisine,
                 command_type=command_type,
-                collection_prompt=collection_prompt,  # Include collection prompt for UI
+                restaurants=restaurants,
+                response_count=len(restaurants) if restaurants else 0,
                 timestamp=datetime.now()
             )
             
         except Exception as e:
-            logger.error(f"Error in query method: {str(e)}", exc_info=True)
+            logger.error(f"Error processing query: {str(e)}")
+            error_message = "Sorry, I encountered an error processing your request. Please try again."
+            
+            if thread_id:
+                self.memory.add_ai_message(thread_id, error_message)
+            
             return RestaurantQueryResponse(
                 success=False,
-                message="An error occurred while processing your query",
+                message=error_message,
                 query=query,
                 thread_id=thread_id or str(uuid.uuid4()),
+                response_count=0,
                 error=str(e),
                 timestamp=datetime.now()
             )
-    
 
+    def _is_collection_request_with_stored_restaurants(self, query: str, thread_id: str, auth_token: Optional[str]) -> bool:
+        """Check if this is a collection creation request and we have stored restaurants."""
+        logger.info(f"Checking collection request: query='{query}', thread_id={thread_id}, has_auth_token={bool(auth_token)}")
+        
+        if not auth_token:
+            logger.info("No auth token provided - not a collection request")
+            return False
+        
+        # Use LLM to classify if this is a collection creation request
+        is_collection_request = self._classify_collection_request(query, thread_id)
+        
+        if not is_collection_request:
+            logger.info("Query classified as NOT a collection request")
+            return False
+            
+        # Check if we have stored restaurants
+        last_restaurants, _ = self.memory.get_last_restaurants(thread_id)
+        has_restaurants = len(last_restaurants) > 0
+        
+        logger.info(f"Memory check: has_restaurants={has_restaurants}, restaurant_count={len(last_restaurants)}")
+        
+        if has_restaurants:
+            logger.info("✅ Collection request detected with stored restaurants - triggering collection creation")
+        else:
+            logger.info("❌ Collection request detected but no stored restaurants found")
+            
+        return has_restaurants
+
+    def _classify_collection_request(self, query: str, thread_id: str) -> bool:
+        """Use LLM to classify if a query is asking for collection creation."""
+        try:
+            # Get conversation context if available
+            conversation_context = ""
+            try:
+                conversation_history = self.memory.get_conversation_history(thread_id)
+                if conversation_history and len(conversation_history) > 0:
+                    # Get the last AI message for context
+                    for msg in reversed(conversation_history):
+                        if hasattr(msg, 'type') and msg.type == 'ai':
+                            conversation_context = f"Previous AI message: {msg.content[:200]}..."
+                            break
+            except Exception as e:
+                logger.warning(f"Could not get conversation context: {str(e)}")
+            
+            classification_prompt = f"""Analyze if the user's query is asking to create a restaurant collection.
+
+User Query: "{query}"
+{conversation_context}
+
+A collection creation request is when the user wants to:
+1. Create/make/save a collection of restaurants
+2. Save restaurant search results
+3. Organize restaurants into a group
+4. Respond affirmatively (yes/ok/sure) to a previous AI suggestion about creating a collection
+
+Return ONLY "YES" if this is a collection creation request, or "NO" if it's not.
+
+Examples:
+- "create a collection" → YES
+- "save these restaurants" → YES  
+- "make a collection from these results" → YES
+- "yes" (when previous AI asked about creating collection) → YES
+- "what are the opening hours?" → NO
+- "tell me about Italian cuisine" → NO
+- "find more restaurants" → NO
+- "yes I want more information about restaurants" → NO
+
+Answer:"""
+
+            from langchain_core.messages import SystemMessage, HumanMessage
+            
+            messages = [
+                SystemMessage(content="You are a classification assistant. Analyze queries to determine if they're asking for collection creation. Respond with only 'YES' or 'NO'."),
+                HumanMessage(content=classification_prompt)
+            ]
+            
+            response = self.agent.llm.invoke(messages)
+            classification = response.content.strip().upper()
+            
+            is_collection_request = classification == "YES"
+            logger.info(f"LLM classification for query '{query}': {classification} → {is_collection_request}")
+            
+            return is_collection_request
+            
+        except Exception as e:
+            logger.error(f"Error classifying collection request: {str(e)}")
+            # Fallback: if LLM fails, be conservative and return False
+            return False
+
+    async def _handle_collection_creation_from_memory(self, query: str, thread_id: str, auth_token: str) -> RestaurantQueryResponse:
+        """Handle collection creation using restaurants stored in memory."""
+        try:
+            logger.info(f"Handling collection creation from memory for thread {thread_id}")
+            
+            # Get stored restaurants and query context
+            last_restaurants, last_query = self.memory.get_last_restaurants(thread_id)
+            
+            if not last_restaurants:
+                error_message = "No recent restaurant search results available for collection creation."
+                self.memory.add_ai_message(thread_id, error_message)
+                return RestaurantQueryResponse(
+                    success=False,
+                    message=error_message,
+                    query=query,
+                    thread_id=thread_id,
+                    response_count=0,
+                    error="No stored restaurants",
+                    timestamp=datetime.now()
+                )
+            
+            # Extract restaurant IDs from stored restaurants
+            restaurant_ids = []
+            logger.info(f"Extracting restaurant IDs from {len(last_restaurants)} stored restaurants")
+            
+            for i, restaurant in enumerate(last_restaurants):
+                logger.info(f"Restaurant {i+1}: name='{restaurant.name}', description='{restaurant.description}'")
+                
+                if restaurant.description and restaurant.description.startswith("ID:"):
+                    # Extract actual ID from "ID:actual_id|other_description" format
+                    id_part = restaurant.description.split("|")[0].replace("ID:", "").strip()
+                    restaurant_ids.append(id_part)
+                    logger.info(f"  → Extracted real ID: {id_part}")
+                else:
+                    # Fallback to name-based ID if no actual ID available
+                    fallback_id = restaurant.name.replace(" ", "_").lower()
+                    restaurant_ids.append(fallback_id)
+                    logger.info(f"  → Using fallback ID: {fallback_id}")
+            
+            logger.info(f"Final restaurant IDs to add to collection: {restaurant_ids}")
+            
+            # Generate collection name and description using LLM
+            collection_details = await self._generate_collection_details(last_query, last_restaurants)
+            
+            # Create collection with restaurants using the API client
+            from ...utils.restaurant_util import RestaurantAPIClient
+            api_client = RestaurantAPIClient(self.command_parser.server_url)
+            
+            result = api_client.create_collection_with_restaurants_sync(
+                name=collection_details["name"],
+                description=collection_details["description"],
+                restaurant_ids=restaurant_ids,
+                is_public=True,
+                tags=collection_details["tags"],
+                auth_token=auth_token
+            )
+            
+            # Parse the result
+            import json
+            result_data = json.loads(result)
+            
+            if result_data.get("error"):
+                error_message = f"Failed to create collection: {result_data['error']}"
+                self.memory.add_ai_message(thread_id, error_message)
+                return RestaurantQueryResponse(
+                    success=False,
+                    message=error_message,
+                    query=query,
+                    thread_id=thread_id,
+                    response_count=0,
+                    error=result_data["error"],
+                    timestamp=datetime.now()
+                )
+            
+            # Generate success message
+            collection_name = collection_details["name"]
+            added_count = result_data.get("successfully_added", 0)
+            total_count = result_data.get("total_restaurants", len(restaurant_ids))
+            
+            success_message = f"✅ Collection '{collection_name}' created successfully!\n"
+            success_message += f"📊 Added {added_count}/{total_count} restaurants to your collection."
+            
+            if result_data.get("failed_restaurants"):
+                failed_count = len(result_data["failed_restaurants"])
+                success_message += f"\n⚠️ {failed_count} restaurants failed to add."
+            
+            self.memory.add_ai_message(thread_id, success_message)
+            
+            return RestaurantQueryResponse(
+                success=True,
+                message=success_message,
+                query=query,
+                thread_id=thread_id,
+                command_type="collection",
+                collection_result=result_data,
+                response_count=len(restaurant_ids),
+                timestamp=datetime.now()
+            )
+            
+        except Exception as e:
+            logger.error(f"Error handling collection creation from memory: {str(e)}")
+            error_message = "Sorry, I encountered an error creating the collection. Please try again."
+            
+            self.memory.add_ai_message(thread_id, error_message)
+            return RestaurantQueryResponse(
+                success=False,
+                message=error_message,
+                query=query,
+                thread_id=thread_id,
+                response_count=0,
+                error=str(e),
+                timestamp=datetime.now()
+            )
+
+    async def _generate_collection_details(self, search_query: str, restaurants: List[RestaurantInfo]) -> Dict[str, Any]:
+        """Generate collection name, description and tags based on search context."""
+        try:
+            # Extract cuisines and locations from restaurants
+            cuisines = set()
+            locations = set()
+            
+            for restaurant in restaurants:
+                if hasattr(restaurant, 'cuisine') and restaurant.cuisine:
+                    cuisines.add(restaurant.cuisine)
+                if hasattr(restaurant, 'location') and restaurant.location:
+                    locations.add(restaurant.location)
+            
+            # Create prompt for LLM to generate collection details
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+            
+            prompt = f"""Generate collection details for a restaurant collection based on this context:
+
+Search Query: {search_query}
+Number of Restaurants: {len(restaurants)}
+Cuisines Found: {', '.join(cuisines) if cuisines else 'Mixed'}
+Locations: {', '.join(locations) if locations else 'Various'}
+
+Generate a JSON response with:
+1. "name": A unique, descriptive collection name
+2. "description": A detailed description of the collection
+3. "tags": An array of 3-5 relevant tags
+
+Requirements:
+- Name should be catchy and descriptive and it should be short and concise
+- Description should mention the search context and it should be one short and concise sentence
+- Tags should be relevant to the cuisine/location/search
+
+Example format:
+{{
+  "name": "Italian Spots (Delhi)",
+  "description": "A curated collection of top Italian restaurants found during our search in Delhi, featuring authentic cuisine and great ambiance.",
+  "tags": ["italian", "delhi", "curated", "authentic", "dining"]
+}}"""
+
+            from langchain_core.messages import SystemMessage, HumanMessage
+            
+            messages = [
+                SystemMessage(content="You are a helpful assistant that generates restaurant collection details. Always respond with valid JSON only."),
+                HumanMessage(content=prompt)
+            ]
+            
+            response = await self.agent.llm.ainvoke(messages)
+            
+            # Parse JSON response
+            import json
+            collection_details = json.loads(response.content.strip())
+            
+            # Validate required fields
+            if not all(key in collection_details for key in ["name", "description", "tags"]):
+                raise ValueError("Missing required fields in LLM response")
+                
+            return collection_details
+            
+        except Exception as e:
+            logger.error(f"Error generating collection details: {str(e)}")
+            # Fallback to simple details
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+            
+            return {
+                "name": f"Restaurant Collection - {timestamp}",
+                "description": f"A curated collection of restaurants from search: {search_query}",
+                "tags": ["curated", "restaurants", "search_results"]
+            }
     
     async def _generate_ai_message(self, query: str, restaurants: Optional[List[RestaurantInfo]], location: Optional[str]) -> str:
-        """Generate a conversational AI message about the restaurants found."""
-        try:
-            if not restaurants:
-                return f"I couldn't find any restaurants for in {location or 'the specified area'}. You might want to try a different search or location."
+        """Generate a conversational AI message about the restaurants found or no results."""
+        logger.info(f"Generating AI message for query: '{query}', restaurants: {len(restaurants) if restaurants else 0}, location: {location}")
+        
+        if not restaurants or len(restaurants) == 0:
+            logger.info(f"No restaurants found for query '{query}' in location '{location}', generating no-results message")
             
-            ai_prompt = f"""Based on the user's query "{query}" in {location or 'New Delhi'}, I found {len(restaurants)} restaurant{'s' if len(restaurants) != 1 else ''}.
+            # Prompt for no results scenario
+            ai_prompt = f"""Generate a helpful and friendly response when no restaurants were found for the user's query.
 
-Please generate a brief, friendly response that:
-1. Acknowledges their query
-2. Mentions the number of restaurants found
-3. Suggests creating a collection from these restaurants by saying "Would you like me to create a collection from these restaurants? Just say 'create a collection'!"
+User Query: {query}
+Location: {location or 'not specified'}
 
-Keep it short and conversational. Don't list individual restaurants since they're provided separately in the structured data."""
+The response should:
+1. Acknowledge that no restaurants were found
+2. Be empathetic and helpful
+3. Suggest alternative search options (try different keywords, location, cuisine type)
+4. Keep it conversational and encouraging
+5. Keep it concise (2-3 sentences max)
 
-            # Use direct LLM call for simple message generation (not agent)
-            from langchain_core.messages import SystemMessage, HumanMessage
-            import asyncio
-            try:
-                messages = [
-                    SystemMessage(content="You are a helpful restaurant assistant. Generate brief, friendly responses."),
-                    HumanMessage(content=ai_prompt)
-                ]
-                
-                response = await asyncio.wait_for(
-                    self.agent.llm.ainvoke(messages),
-                    timeout=8.0  # 8 second timeout for direct LLM call
-                )
-                
-                if response and response.content:
-                    return response.content.strip()
-                else:
-                    # Fallback to simple formatting if LLM fails
-                    return self._create_simple_ai_message(query, restaurants, location)
-            except asyncio.TimeoutError:
-                logger.warning("AI message generation timed out, using fallback")
-                return self._create_simple_ai_message(query, restaurants, location)
-            except Exception as e:
-                logger.warning(f"LLM message generation failed: {str(e)}, using fallback")
-                return self._create_simple_ai_message(query, restaurants, location)
-                
-        except Exception as e:
-            logger.error(f"Error generating AI message: {str(e)}")
-            return self._create_simple_ai_message(query, restaurants, location)
-    
-    def _create_simple_ai_message(self, query: str, restaurants: List[RestaurantInfo], location: Optional[str]) -> str:
-        """Create a simple AI message as fallback."""
-        try:
-            message = f"Great! I found {len(restaurants)} restaurant{'s' if len(restaurants) != 1 else ''}"
-            if location:
-                message += f" in {location}"
-            message += ". "
-            
-            message += "💡 *Would you like me to create a collection from these restaurants? Just say 'create a collection' and I'll save them for you!*"
-            return message
-            
-        except Exception as e:
-            logger.error(f"Error creating simple AI message: {str(e)}")
-            return f"I found some restaurants for your query '{query}', but had trouble formatting the response."
+Example: "I couldn't find any restaurants matching your search for [query]. You might want to try searching with different keywords, a broader location, or a different cuisine type. I'm here to help you find the perfect place!"
 
-    async def _enhance_message_with_context(self, message: str, thread_id: str, last_restaurants: List[RestaurantInfo], last_query: Optional[str], auth_token: Optional[str]) -> str:
-        """Enhance the user message with conversation context using LLM."""
-        try:
-            # Check if user is asking to create collection and we have previous restaurants
-            if last_restaurants and self._is_collection_request(message):
-                # Extract restaurant IDs from the last restaurants (limit to top 20 for performance)
-                max_restaurants = 20
-                limited_restaurants = last_restaurants[:max_restaurants]
-                restaurant_ids = []
-                restaurant_names = []
-                
-                for restaurant in limited_restaurants:
-                    if restaurant.name:
-                        restaurant_names.append(restaurant.name)
-                        # Extract actual restaurant ID from description field if available
-                        if restaurant.description and restaurant.description.startswith("ID:"):
-                            # Extract ID from "ID:actual_id|other_description" format
-                            id_part = restaurant.description.split("|")[0].replace("ID:", "").strip()
-                            restaurant_ids.append(id_part)
-                        else:
-                            # Fallback to name-based ID if no actual ID available
-                            restaurant_ids.append(restaurant.name.replace(" ", "_").lower())
-                
-                collection_context = f"""
-                Previous restaurant search: "{last_query}"
-                Found restaurants: {', '.join(restaurant_names)}
-                Restaurant IDs: {', '.join(restaurant_ids)}
-                
-                User wants to create a collection from these restaurants.
-                """
-                
-                # Generate a unique collection name
-                import datetime
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-                
-                collection_name = "My Restaurant Collection"
-                if "called" in message.lower() or "named" in message.lower():
-                    # Try to extract collection name from user message
-                    import re
-                    name_match = re.search(r'(?:called|named)\s+["\']?([^"\']+)["\']?', message, re.IGNORECASE)
-                    if name_match:
-                        collection_name = name_match.group(1).strip()
-                        # Add timestamp to make it unique
-                        collection_name = f"{collection_name} - {timestamp}"
-                elif last_query:
-                    # Generate descriptive name based on search query and add timestamp
-                    # Extract key terms from the query
-                    query_lower = last_query.lower()
-                    if "italian" in query_lower:
-                        collection_name = f"Italian Favorites - {timestamp}"
-                    elif "pizza" in query_lower:
-                        collection_name = f"Pizza Collection - {timestamp}"
-                    elif "chinese" in query_lower:
-                        collection_name = f"Chinese Restaurants - {timestamp}"
-                    elif "romantic" in query_lower or "dinner" in query_lower:
-                        collection_name = f"Romantic Dining - {timestamp}"
-                    elif "budget" in query_lower or "cheap" in query_lower:
-                        collection_name = f"Budget Friendly Eats - {timestamp}"
-                    else:
-                        collection_name = f"Great Finds from '{last_query}' - {timestamp}"
-                else:
-                    collection_name = f"My Restaurant Collection - {timestamp}"
-                
-                # Use the create_collection_with_restaurants tool
-                # Convert restaurant_ids to a safe string representation
-                restaurant_ids_str = str(restaurant_ids).replace('{', '{{').replace('}', '}}')
-                
-                # Update description based on limitation
-                total_found = len(last_restaurants)
-                description = f"Collection of top {len(restaurant_names)} restaurants from search: {last_query}"
-                if total_found > max_restaurants:
-                    description += f" (showing top {max_restaurants} out of {total_found} found)"
-                
-                enhanced_message = f"""
-                TASK: Create a restaurant collection from previous search results.
-                
-                CONTEXT:
-                - Previous search: "{last_query}"
-                - Total found: {total_found} restaurants
-                - Adding top {len(restaurant_names)} restaurants: {', '.join(restaurant_names[:5])}{'...' if len(restaurant_names) > 5 else ''}
-                - Restaurant IDs to add: {restaurant_ids_str}
-                
-                USER REQUEST: {message}
-                
-                INSTRUCTIONS:
-                1. Use the create_collection_with_restaurants tool
-                2. Collection name: "{collection_name}"
-                3. Description: "{description}"
-                4. Restaurant IDs: {restaurant_ids_str}
-                5. Auth token: {auth_token or 'not_provided'}
-                6. Set is_public: true
-                7. Tags: ["user_created", "restaurant_search"]
-                
-                The user wants to create a collection from the restaurants found in their previous search. Use the create_collection_with_restaurants tool with the parameters above.
-                """
-                 
-                logger.info(f"Enhanced collection creation message with {len(restaurant_ids)} restaurant IDs: {restaurant_ids[:3]}...")
-                return enhanced_message
+Keep the tone friendly and supportive."""
+
+            system_message = "You are a helpful restaurant assistant. Generate empathetic and helpful responses when no restaurants are found."
             
-            # For other messages, add conversation history if relevant
-            messages = self.memory.get_thread_messages(thread_id)
-            recent_messages = messages[-6:] if len(messages) > 6 else messages  # Last 3 exchanges
+        else:
+            logger.info(f"Found {len(restaurants)} restaurants: {[r.name for r in restaurants[:3]]}")
             
-            if recent_messages:
-                context = "Recent conversation:\n"
-                for msg in recent_messages:
-                    role = "Human" if msg.__class__.__name__ == "HumanMessage" else "Assistant"
-                    content = msg.content[:100] + "..." if len(msg.content) > 100 else msg.content
-                    context += f"{role}: {content}\n"
-                
-                if last_restaurants:
-                    context += f"\nLast restaurant search had {len(last_restaurants)} results."
-                
-                enhanced_message = f"{context}\n\nCurrent user message: {message}"
-                return enhanced_message
+            # Create a more engaging message that proactively asks about collection creation
+            restaurant_names = [r.name for r in restaurants[:3]]  # Show first 3 restaurant names
+            name_preview = ", ".join(restaurant_names)
+            if len(restaurants) > 3:
+                name_preview += f" and {len(restaurants) - 3} more"
             
-            return message
-            
-        except Exception as e:
-            logger.error(f"Error enhancing message with context: {str(e)}")
-            return message
-    
-    def _is_collection_request(self, message: str) -> bool:
-        """Check if the message is requesting to create a collection."""
-        collection_keywords = [
-            "create collection", "make collection", "save these", "create list",
-            "make list", "save restaurants", "collection", "save them"
+            # Prompt for successful results scenario
+            ai_prompt = f"""Generate a friendly, conversational response about finding {len(restaurants)} restaurants including {name_preview}.
+
+The response should:
+1. Briefly mention the search results (don't list all restaurants)
+2. Proactively ask if the user wants to create a collection from these restaurants
+3. Make it clear they can just say "yes" or "create collection"
+4. Be enthusiastic and helpful
+5. Keep it concise (2-3 sentences max)
+
+Example: "Great! I found 5 amazing restaurants for you including [Restaurant Name], [Restaurant Name], and [Restaurant Name]. Would you like me to create a collection from these restaurants? Just say 'yes' and I'll create one with a perfect name!"
+
+Keep the tone friendly and conversational."""
+
+            system_message = "You are a helpful restaurant assistant. Generate brief, friendly, and engaging responses that proactively suggest collection creation."
+
+        # Use direct LLM call for message generation
+        from langchain_core.messages import SystemMessage, HumanMessage
+        
+        messages = [
+            SystemMessage(content=system_message),
+            HumanMessage(content=ai_prompt)
         ]
-        message_lower = message.lower()
-        return any(keyword in message_lower for keyword in collection_keywords)
+                
+        logger.info("Calling LLM for AI message generation")
+        response = await self.agent.llm.ainvoke(messages)
+        
+        logger.info("LLM response received successfully")
+        return response.content.strip()
+    
+    def _extract_restaurant_location(self, restaurant_data: dict) -> str:
+        """Extract location from restaurant data handling different field names.
+        
+        Args:
+            restaurant_data: Dictionary containing restaurant information
+            
+        Returns:
+            Location string or empty string if not found
+        """
+        return (restaurant_data.get('location') or 
+                restaurant_data.get('place') or 
+                restaurant_data.get('address') or
+                restaurant_data.get('area') or '')
     
     def _get_command_type(self, command) -> str:
         """Get the command type from a parsed command."""
@@ -529,73 +568,37 @@ Keep it short and conversational. Don't list individual restaurants since they'r
     def _format_api_response(self, api_data) -> str:
         """Format the API response for display."""
         try:
-            # Handle list format with restaurant data
-            if isinstance(api_data, list):
-                all_restaurants = []
-                for item in api_data:
-                    if isinstance(item, dict) and 'restaurants' in item:
-                        all_restaurants.extend(item['restaurants'])
-                
-                if all_restaurants:
+            # Handle new tag-based search response format
+            if isinstance(api_data, dict) and 'restaurants' in api_data:
+                restaurants = api_data.get('restaurants', [])
+                if restaurants and isinstance(restaurants, list):
                     formatted_response = "Here are the restaurant recommendations:\n\n"
-                    for i, restaurant in enumerate(all_restaurants, 1):
+                    for i, restaurant in enumerate(restaurants, 1):
                         name = restaurant.get('name', 'Restaurant')
-                        place = restaurant.get('place', '')
+                        # Handle different location field names from the API
+                        location = self._extract_restaurant_location(restaurant)
+                        rating = restaurant.get('rating', '')
+                        cuisine = restaurant.get('cuisine', '')
+                        price_range = restaurant.get('price_range', '')
                         
                         formatted_response += f"{i}. **{name}**"
-                        if place:
-                            formatted_response += f" - {place}"
+                        if location:
+                            formatted_response += f" - {location}"
                         formatted_response += "\n"
+                        
+                        details = []
+                        if rating:
+                            details.append(f"⭐ {rating}")
+                        if cuisine:
+                            details.append(f"{cuisine}")
+                        if price_range:
+                            details.append(f"{price_range}")
+                        
+                        if details:
+                            formatted_response += f"   {' | '.join(details)}\n"
                         formatted_response += "\n"
                     
                     return formatted_response.strip()
-            
-            # Handle dictionary format
-            elif isinstance(api_data, dict):
-                # Handle restaurant search responses
-                if 'questions' in api_data:
-                    questions = api_data.get('questions', [])
-                    if questions:
-                        formatted_response = "Here are some restaurant recommendations:\n\n"
-                        for i, question in enumerate(questions, 1):
-                            title = question.get('title', 'Restaurant')
-                            description = question.get('description', '')
-                            formatted_response += f"{i}. **{title}**\n"
-                            if description:
-                                formatted_response += f"   {description}\n"
-                            formatted_response += "\n"
-                        return formatted_response.strip()
-                
-                # Handle direct restaurant listings
-                if 'restaurants' in api_data:
-                    restaurants = api_data.get('restaurants', [])
-                    if restaurants:
-                        formatted_response = "Here are the restaurant recommendations:\n\n"
-                        for i, restaurant in enumerate(restaurants, 1):
-                            name = restaurant.get('name', 'Restaurant')
-                            location = restaurant.get('location', '')
-                            rating = restaurant.get('rating', '')
-                            cuisine = restaurant.get('cuisine', '')
-                            price_range = restaurant.get('price_range', '')
-                            
-                            formatted_response += f"{i}. **{name}**"
-                            if location:
-                                formatted_response += f" - {location}"
-                            formatted_response += "\n"
-                            
-                            details = []
-                            if rating:
-                                details.append(f"⭐ {rating}")
-                            if cuisine:
-                                details.append(f"{cuisine}")
-                            if price_range:
-                                details.append(f"{price_range}")
-                            
-                            if details:
-                                formatted_response += f"   {' | '.join(details)}\n"
-                            formatted_response += "\n"
-                        
-                        return formatted_response.strip()
             
             # Generic formatting for other response types
             return self._format_tool_response(api_data)
@@ -626,104 +629,34 @@ Keep it short and conversational. Don't list individual restaurants since they'r
         try:
             restaurants = []
             
-            # Handle direct 'restaurants' key in API response
-            if 'restaurants' in api_data:
-                for restaurant_data in api_data['restaurants']:
-                    name = restaurant_data.get('name')
-                    location = restaurant_data.get('location')
-                    restaurant_id = restaurant_data.get('_id') or restaurant_data.get('id')
+            # Handle new tag-based search response format - restaurants directly in response
+            if isinstance(api_data, dict) and 'restaurants' in api_data:
+                restaurant_list = api_data['restaurants']
+                if restaurant_list and isinstance(restaurant_list, list):
+                    for restaurant_data in restaurant_list:
+                        name = restaurant_data.get('name')
+                        # Handle different location field names from the API
+                        location = self._extract_restaurant_location(restaurant_data)
+                        restaurant_id = restaurant_data.get('_id') or restaurant_data.get('id')
                     
-                    if name and location:
-                        description = restaurant_data.get('description', '')
-                        # Store the ID for collection creation if available
-                        if restaurant_id:
-                            description = f"ID:{restaurant_id}|{description}"
-                        
-                        restaurant = RestaurantInfo(
-                            name=name,
-                            location=location,
-                            rating=restaurant_data.get('rating'),
-                            cuisine=restaurant_data.get('cuisine'),
-                            price_range=restaurant_data.get('price_range'),
-                            description=description
-                        )
-                        restaurants.append(restaurant)
-            
-            # Handle array format where each element has 'restaurants' array
-            elif isinstance(api_data, list):
-                for item in api_data:
-                    if isinstance(item, dict) and 'restaurants' in item:
-                        for restaurant_data in item['restaurants']:
-                            name = restaurant_data.get('name')
-                            place = restaurant_data.get('place')
-                            restaurant_id = restaurant_data.get('_id') or restaurant_data.get('id')
+                        if name:  # Only require name, location is optional
+                            description = restaurant_data.get('description', '')
+                            # Store the ID for collection creation if available
+                            if restaurant_id:
+                                description = f"ID:{restaurant_id}|{description}"
                             
-                            if name and place:
-                                restaurant = RestaurantInfo(
-                                    name=name,
-                                    location=place,
-                                    rating=None,  # Not available in this format
-                                    cuisine=None,  # Could be extracted from foodTags if needed
-                                    price_range=None,  # Not available in this format
-                                    description=restaurant_data.get('googleMapLink')
-                                )
-                                # Store the ID for collection creation
-                                if restaurant_id:
-                                    restaurant.description = f"ID:{restaurant_id}|{restaurant.description or ''}"
-                                restaurants.append(restaurant)
-            
-            # Handle 'questions' format (from /api/questions endpoint)
-            elif 'questions' in api_data:
-                for question in api_data['questions']:
-                    title = question.get('title')
-                    description = question.get('description', '')
-                    
-                    if title:
-                        restaurant = RestaurantInfo(
-                            name=title,
-                            description=description
-                        )
-                        restaurants.append(restaurant)
+                            restaurant = RestaurantInfo(
+                                name=name,
+                                location=location,
+                                rating=restaurant_data.get('rating'),
+                                cuisine=restaurant_data.get('cuisine'),
+                                price_range=restaurant_data.get('price_range'),
+                                description=description
+                            )
+                            restaurants.append(restaurant)
             
             return restaurants if restaurants else None
              
         except Exception as e:
             logger.error(f"Error extracting restaurants from API response: {str(e)}")
-            return None
-
-    def _extract_restaurants_from_response(self, response_message: str) -> Optional[List[RestaurantInfo]]:
-        """Extract restaurant information from agent response message."""
-        try:
-            restaurants = []
-            
-            # Look for restaurant patterns in the response
-            lines = response_message.split('\n')
-            
-            for line in lines:
-                line = line.strip()
-                # Look for numbered restaurant entries like "1. **Restaurant Name**"
-                if line and (line[0].isdigit() or line.startswith('•')):
-                    # Extract restaurant name
-                    if '**' in line:
-                        # Extract text between ** markers
-                        parts = line.split('**')
-                        if len(parts) >= 3:
-                            name = parts[1].strip()
-                            # Look for location info after the name
-                            remaining = '**'.join(parts[2:]).strip()
-                            location = None
-                            if ' - ' in remaining:
-                                location = remaining.split(' - ')[1].split('\n')[0].strip()
-                            
-                            if name:
-                                restaurant = RestaurantInfo(
-                                    name=name,
-                                    location=location
-                                )
-                                restaurants.append(restaurant)
-            
-            return restaurants if restaurants else None
-            
-        except Exception as e:
-            logger.error(f"Error extracting restaurants from response: {str(e)}")
             return None 

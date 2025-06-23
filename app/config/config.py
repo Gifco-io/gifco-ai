@@ -11,9 +11,9 @@ class OpenAIConfig:
     """OpenAI/Language Model configuration."""
     
     # Model settings
-    MODEL_NAME: str = os.getenv("OPENAI_MODEL_NAME", "openai/gpt-4o-2024-11-20")
-    BASE_URL: str = os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
-    API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+    MODEL_NAME: str = os.getenv("LLM_MODEL", "openai/gpt-4o-2024-11-20")
+    BASE_URL: str = os.getenv("LLM_BASE_URL", "https://openrouter.ai/api/v1")
+    API_KEY: str = os.getenv("LLM_API_KEY", "")
     
     # Agent settings
     AGENT_TEMPERATURE: float = float(os.getenv("AGENT_TEMPERATURE", "0.7"))

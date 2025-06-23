@@ -11,9 +11,7 @@ logger = logging.getLogger(__name__)
 
 class RestaurantSearchInput(BaseModel):
     """Input schema for restaurant search tool."""
-    query: str = Field(description="The search query for restaurants")
-    place: str = Field(default="New Delhi", description="The location to search in")
-    query_type: str = Field(default="current", description="Type of query (current, trending, popular)")
+    query: str = Field(description="The search query for restaurants from which tags will be extracted")
 
 
 class CollectionCreateInput(BaseModel):
@@ -63,8 +61,8 @@ class RestaurantTool:
         return [
             StructuredTool(
                 name="search_restaurants",
-                description="Search for restaurants based on query, location and type. Use this tool to find restaurants matching specific criteria or get recommendations.",
-                func=api_tool.search_restaurants_sync,  
+                description="Search for restaurants based on extracted tags from user query. Use this tool to find restaurants matching specific criteria or get recommendations. The tool will automatically extract relevant tags from the query such as food items, locations, and preferences.",
+                func=api_tool.search_restaurants_by_tags_sync,  
                 args_schema=RestaurantSearchInput
             ),
             StructuredTool(
@@ -87,7 +85,6 @@ class RestaurantTool:
     - Search for restaurants by location and cuisine
     - Find popular dining spots  
     - Recommend places based on your preferences
-    - Provide restaurant details and reviews
     - Create curated restaurant collections
 
     Just tell me what you're looking for and where!"""

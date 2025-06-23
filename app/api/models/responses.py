@@ -27,12 +27,8 @@ class RestaurantQueryResponse(BaseModel):
         None, 
         description="List of restaurants (if applicable)"
     )
-    location: Optional[str] = Field(None, description="Location searched")
-    cuisine: Optional[str] = Field(None, description="Cuisine type searched")
+    response_count: Optional[int] = Field(None, description="Number of restaurants found in the response")
     command_type: Optional[str] = Field(None, description="Type of command detected")
-    collection_prompt: Optional[str] = Field(None, description="Prompt asking user if they want to create a collection")
-    collection_created: Optional[bool] = Field(None, description="Whether a collection was created")
-    collection_result: Optional[Dict[str, Any]] = Field(None, description="Collection creation result details")
     error: Optional[str] = Field(None, description="Error message if any")
     timestamp: datetime = Field(default_factory=datetime.now, description="Response timestamp")
 

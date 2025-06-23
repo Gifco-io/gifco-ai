@@ -21,7 +21,7 @@ class RestaurantChatCLI:
             auth_token: Optional authorization token for collection creation
         """
         self.api_base_url = api_base_url
-        self.auth_token = "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IkV3ZmZncFlOdVoxTTBERHdtdngxTmNIRVlYMm9YSzEwZDhYRFl5ZUllTXMifQ.eyJzaWQiOiJjbWM1N2JydW4wMW5sbDcwbWE0emt5OXg4IiwiaXNzIjoicHJpdnkuaW8iLCJpYXQiOjE3NTA0NDc2MzUsImF1ZCI6ImNtOHVqNDRyaDAwMDM4dmJsZGJxMW5vcXUiLCJzdWIiOiJkaWQ6cHJpdnk6Y204dzE2eDM2MDFqZXJheWN5MDdmZHhlaiIsImV4cCI6MTc1MDQ1MTIzNX0.yXBZKj9-lo6ygVVy8JvQzCn6y8-NuQV173lV5XVfEJtQYduTATUfxDXvmHpAhGptvD9VFbtQjT27T41z9ees1g"
+        self.auth_token = "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IkV3ZmZncFlOdVoxTTBERHdtdngxTmNIRVlYMm9YSzEwZDhYRFl5ZUllTXMifQ.eyJzaWQiOiJjbWM2cHdwdXgwMDRqbDQwbnY5bnlrYXlyIiwiaXNzIjoicHJpdnkuaW8iLCJpYXQiOjE3NTA1MzkzMTIsImF1ZCI6ImNtOHVqNDRyaDAwMDM4dmJsZGJxMW5vcXUiLCJzdWIiOiJkaWQ6cHJpdnk6Y204dzE2eDM2MDFqZXJheWN5MDdmZHhlaiIsImV4cCI6MTc1MDU0MjkxMn0.fT8PomSvrC72sJtPpquF1H-vZjdclHjhZoN4Jtfk68MFY3IcnxaIn6OsFCxll_8RyfA7yVy0Oryx4260_1SJgQ"
         self.session = None
         self.thread_id = str(uuid.uuid4())  # Generate unique thread ID for this session
         self.conversation_history = []
