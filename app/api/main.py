@@ -109,7 +109,7 @@ async def health_check():
     return HealthResponse(status="healthy")
 
 
-@app.post("/query", response_model=RestaurantQueryResponse)
+@app.post("/chat", response_model=RestaurantQueryResponse)
 async def query_restaurants(
     request: RestaurantQueryRequest,
     authorization: Optional[str] = Header(None)
