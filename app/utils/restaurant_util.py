@@ -9,7 +9,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
 import concurrent.futures
 from dotenv import load_dotenv
-
+from ..config.config import OpenAIConfig
 logger = logging.getLogger(__name__)
 
 
@@ -27,9 +27,10 @@ class RestaurantAPIClient:
         
         # Initialize LLM for tag extraction
         self.llm = ChatOpenAI(
-            model_name="openai/gpt-4o-mini-2024-07-18",
+            model_name=OpenAIConfig.MODEL_NAME,
             temperature=0.0,
-            base_url=os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1"),
+            api_key=OpenAIConfig.API_KEY,
+            base_url=OpenAIConfig.BASE_URL,
             request_timeout=30,
             max_retries=1,
             streaming=False

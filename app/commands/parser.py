@@ -19,7 +19,7 @@ from ..agent.tools.tools import RestaurantTool
 from ..utils.restaurant_util import RestaurantAPIClient
 from .command import get_command_functions
 from ..characters.parser import ParserCharacter 
-
+from ..config.config import OpenAIConfig
 logger = logging.getLogger(__name__)
 
 
@@ -139,7 +139,7 @@ class CommandParser:
     recommendation requests, and informational queries.
     """
 
-    def __init__(self, model_name: str = "openai/gpt-4o-mini-2024-07-18", temperature: float = 0.0, server_url: str = None):
+    def __init__(self, server_url: str = None):
         """Initialize the command parser.
         
         Args:
@@ -150,10 +150,11 @@ class CommandParser:
         load_dotenv()
         
         self.llm = ChatOpenAI(
-            model_name=model_name,
-            temperature=temperature,
+            model_name=OpenAIConfig.MODEL_NAME,
+            temperature=OpenAIConfig.PARSER_TEMPERATURE,
             callbacks=[CommandParserLoggingHandler()],
-            base_url=os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1"),
+            api_key=OpenAIConfig.API_KEY,
+            base_url=OpenAIConfig.BASE_URL,
             request_timeout=10,  # Reduced to 10 seconds for parser
             max_retries=0,  # No retries for faster parsing
             streaming=False  # Disable streaming

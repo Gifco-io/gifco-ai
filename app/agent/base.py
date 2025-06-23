@@ -256,8 +256,8 @@ class RestaurantRecommenderAgent:
 
     def __init__(
         self,
-        model_name: str = "openai/gpt-4o-mini-2024-07-18",
-        temperature: float = 0.7,
+        model_name: str = OpenAIConfig.MODEL_NAME,
+        temperature: float = OpenAIConfig.AGENT_TEMPERATURE,
         command_parser: Optional[CommandParser] = None,
         memory: Optional = None,
         # safety_validator: Optional[SafetyValidator] = None,
@@ -278,7 +278,8 @@ class RestaurantRecommenderAgent:
             model_name=model_name,
             temperature=temperature,
             callbacks=[OpenAILoggingHandler()],
-            base_url=os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1"),
+            api_key=OpenAIConfig.API_KEY,
+            base_url=OpenAIConfig.BASE_URL,
             request_timeout=15,  # Reduced timeout to 15 seconds
             max_retries=0,  # No retries to prevent delays
             streaming=False  # Disable streaming for more predictable responses
