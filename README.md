@@ -6,11 +6,9 @@ An AI-powered FastAPI application that processes natural language restaurant que
 
 - **Natural Language Processing**: Query restaurants using natural language like "Best butter chicken spot in new delhi"
 - **Multiple Endpoints**:
-  - `/query` - Direct restaurant queries
   - `/chat` - Conversational interface with thread support
   - `/health` - Health check endpoint
-  - `/examples` - Get example queries
-- **Intelligent Parsing**: Automatically extracts location, cuisine, and preferences from queries
+- **Intelligent Parsing**: Automatically extracts location, cuisine, and preferences from queries using Venice AI
 - **Structured Responses**: Returns well-formatted JSON with restaurant information
 - **Interactive Documentation**: Swagger UI at `/docs` and ReDoc at `/redoc`
 
@@ -20,16 +18,19 @@ An AI-powered FastAPI application that processes natural language restaurant que
 
    ```bash
    cd gifco-ai
-   pip install -r requirements-api.txt
+   python -m venv .venv
+   source .venv/bin/activate
+   pip install -r requirements.txt
    ```
 
 2. **Set up environment variables:**
    Create a `.env` file in the `gifco-ai` directory:
 
    ```env
-   # OpenAI Configuration (required for AI processing)
-   OPENAI_API_KEY=your_openai_api_key_here
-   OPENAI_BASE_URL=https://openrouter.ai/api/v1
+   # Venice AI Configuration (required for AI processing)
+   LLM_API_KEY=vanice-api-key
+   LLM_BASE_URL=https://api.venice.ai/api/v1
+   LLM_MODEL=venice-uncensored
 
    # Restaurant API Configuration
    RESTAURANT_SERVER_URL=http://dev.gifco.io
@@ -47,7 +48,7 @@ An AI-powered FastAPI application that processes natural language restaurant que
 
 ```bash
 cd gifco-ai
-python start_api.py
+python main.py
 ```
 
 ### Method 2: Using uvicorn directly
@@ -72,7 +73,7 @@ The API will be available at:
 
 ## 📚 API Endpoints
 
-### 1. **POST /query** - Restaurant Query
+### 1. **POST /chat** - Restaurant Query
 
 Process natural language restaurant queries.
 
@@ -80,8 +81,8 @@ Process natural language restaurant queries.
 
 ```json
 {
-  "query": "Best butter chicken spot in new delhi",
-  "location": "New Delhi" // Optional location override
+  "query": "Best butter chicken family restaurant in new delhi",
+  "thread_id": "c4b8a624-4ed8-4e65-89ea-e71c1adfdb11" //uuid for keeping chat history
 }
 ```
 
@@ -90,50 +91,29 @@ Process natural language restaurant queries.
 ```json
 {
   "success": true,
-  "message": "🔍 **Searching for restaurants...**\n\n**Query:** Best butter chicken spot in new delhi\n...",
-  "query": "Best butter chicken spot in new delhi",
+  "message": "Awesome news! I found a fantastic restaurant for you, including Kake Da Hotel. Would you like me to create a collection from this and any other spots you discover? Just say \"yes\" or \"create collection,\" and I’ll get it all set up for you!",
+  "query": "best butter chicken family restaurant in delhi",
+  "thread_id": "c4b8a624-4ed8-4e65-89ea-e71c1adfdb11",
   "restaurants": [
     {
-      "name": "Karim's",
-      "cuisine": "Indian Cuisine",
-      "location": "New Delhi",
-      "rating": 4.2,
-      "price_range": "Moderate Price",
-      "description": "Famous for authentic butter chicken and mughlai cuisine"
+      "name": "Kake Da Hotel",
+      "cuisine": null,
+      "location": "Shop No. 67, Municipal Market, Connaught Cir, Connaught Lane, Connaught Place, New Delhi, Delhi 110001, India",
+      "rating": null,
+      "price_range": null,
+      "description": "ID:681908e7df1013eec0053ae6|",
+      "address": null,
+      "phone": null
     }
   ],
-  "location": "New Delhi",
-  "cuisine": "Indian",
-  "timestamp": "2024-01-01T12:00:00Z"
+  "response_count": 1,
+  "command_type": "search",
+  "error": null,
+  "timestamp": "2025-06-23T19:58:31.028055"
 }
 ```
 
-### 2. **POST /chat** - Chat Interface
-
-Conversational interface with thread support.
-
-**Request:**
-
-```json
-{
-  "message": "I'm looking for a good restaurant for dinner",
-  "thread_id": "optional-thread-id" // For conversation continuity
-}
-```
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "message": "I'd be happy to help you find a great restaurant for dinner! Could you tell me...",
-  "thread_id": "generated-or-provided-thread-id",
-  "command_type": "recommendation",
-  "timestamp": "2024-01-01T12:00:00Z"
-}
-```
-
-### 3. **GET /health** - Health Check
+### 2. **GET /health** - Health Check
 
 Check API health status.
 
@@ -147,53 +127,17 @@ Check API health status.
 }
 ```
 
-### 4. **GET /examples** - Example Queries
-
-Get example queries and usage information.
-
-**Response:**
-
-```json
-{
-  "examples": [
-    {
-      "query": "Best butter chicken spot in new delhi",
-      "description": "Search for the best butter chicken restaurants in New Delhi",
-      "type": "location_cuisine_search"
-    }
-  ],
-  "usage": {
-    "query_endpoint": "POST /query with {'query': 'your question here'}",
-    "chat_endpoint": "POST /chat with {'message': 'your message here'}"
-  }
-}
-```
-
-## 🧪 Testing the API
-
-### Using the test script:
-
-```bash
-cd gifco-ai
-python test_api.py
-```
-
 ### Using curl:
 
-```bash
+````bash
 # Test health endpoint
 curl -X GET "http://localhost:8000/health"
 
 # Test query endpoint
-curl -X POST "http://localhost:8000/query" \
+curl -X POST "http://localhost:8000/chat" \
   -H "Content-Type: application/json" \
   -d '{"query": "Best butter chicken spot in new delhi"}'
 
-# Test chat endpoint
-curl -X POST "http://localhost:8000/chat" \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Best butter chicken spot in new delhi?"}'
-```
 
 ### Using Python:
 
@@ -211,7 +155,7 @@ async def test_api():
         print(response.json())
 
 asyncio.run(test_api())
-```
+````
 
 ## 📋 Example Queries
 
@@ -222,18 +166,7 @@ The API can handle various types of restaurant queries:
 - "Best butter chicken spot in new delhi"
 - "Find Italian restaurants in Mumbai"
 - "Pizza places near me in Bangalore"
-
-### General Recommendations:
-
-- "Recommend a good restaurant for dinner"
-- "I want to try something new for lunch"
-- "Best restaurants in Delhi"
-
-### Specific Food Searches:
-
-- "Where can I get good biryani?"
-- "Best Chinese food in Mumbai"
-- "Vegetarian restaurants near me"
+- "Create a collection of these restaurant" //run after search queries
 
 ### Help and Information:
 
@@ -247,7 +180,7 @@ The API is built with:
 
 - **FastAPI**: Modern, fast web framework for building APIs
 - **LangChain**: AI framework for natural language processing
-- **OpenAI**: Language model for understanding and processing queries
+- **Venice AI**: Advanced language models for understanding and processing queries
 - **Pydantic**: Data validation using Python type annotations
 - **Async/Await**: Asynchronous processing for better performance
 
@@ -266,8 +199,8 @@ The API is built with:
 
 | Variable                | Description                       | Default                      |
 | ----------------------- | --------------------------------- | ---------------------------- |
-| `OPENAI_API_KEY`        | OpenAI API key (required)         | -                            |
-| `OPENAI_BASE_URL`       | OpenAI API base URL               | https://openrouter.ai/api/v1 |
+| `LLM_API_KEY`           | Venice AI API key (required)      | -                            |
+| `LLM_BASE_URL`          | Venice AI API base URL            | https://api.venice.ai/api/v1 |
 | `RESTAURANT_SERVER_URL` | External restaurant API URL       | http://dev.gifco.io          |
 | `API_HOST`              | API server host                   | 0.0.0.0                      |
 | `API_PORT`              | API server port                   | 8000                         |
@@ -314,17 +247,6 @@ Logs are structured and include timestamps, request IDs, and detailed context.
 - Error messages don't expose sensitive information
 - Rate limiting should be added for production use
 
-## 🚀 Production Deployment
-
-For production deployment:
-
-1. Set environment variables appropriately
-2. Use a production WSGI server (e.g., Gunicorn with Uvicorn workers)
-3. Add rate limiting
-4. Configure proper CORS origins
-5. Set up monitoring and logging
-6. Use HTTPS
-
 ## 🤝 Contributing
 
 1. Fork the repository
@@ -336,579 +258,3 @@ For production deployment:
 ## 📄 License
 
 This project is licensed under the MIT License.
-
-# vanice-ai
-
-API KEY: RSxMcst7d5TS48cgR3dRWL3_AU5qZ68a-HnOj5VZte
-OPENAI_API_KEY=h6IyrxVtjX1ThU_Gya6-4XWZlsm1WuVNi4iubngt4z
-LLM_MODEL
-
-```
-{
-    "data": [
-        {
-            "created": 1742262554,
-            "id": "venice-uncensored",
-            "model_spec": {
-                "pricing": {
-                    "input": {
-                        "usd": 0.5,
-                        "vcu": 5
-                    },
-                    "output": {
-                        "usd": 2,
-                        "vcu": 20
-                    }
-                },
-                "availableContextTokens": 32768,
-                "capabilities": {
-                    "optimizedForCode": false,
-                    "quantization": "fp16",
-                    "supportsFunctionCalling": false,
-                    "supportsReasoning": false,
-                    "supportsResponseSchema": true,
-                    "supportsVision": false,
-                    "supportsWebSearch": true,
-                    "supportsLogProbs": true
-                },
-                "constraints": {
-                    "temperature": {
-                        "default": 0.3
-                    },
-                    "top_p": {
-                        "default": 1
-                    }
-                },
-                "name": "Venice Uncensored",
-                "modelSource": "https://huggingface.co/cognitivecomputations/Dolphin-Mistral-24B-Venice-Edition",
-                "offline": false,
-                "traits": []
-            },
-            "object": "model",
-            "owned_by": "venice.ai",
-            "type": "text"
-        },
-        {
-            "created": 1741218077,
-            "id": "qwen-2.5-qwq-32b",
-            "model_spec": {
-                "pricing": {
-                    "input": {
-                        "usd": 0.5,
-                        "vcu": 5
-                    },
-                    "output": {
-                        "usd": 2,
-                        "vcu": 20
-                    }
-                },
-                "availableContextTokens": 32768,
-                "capabilities": {
-                    "optimizedForCode": false,
-                    "quantization": "fp8",
-                    "supportsFunctionCalling": false,
-                    "supportsReasoning": true,
-                    "supportsResponseSchema": true,
-                    "supportsVision": false,
-                    "supportsWebSearch": true,
-                    "supportsLogProbs": true
-                },
-                "constraints": {
-                    "temperature": {
-                        "default": 0.6
-                    },
-                    "top_p": {
-                        "default": 0.95
-                    }
-                },
-                "name": "Venice Reasoning",
-                "modelSource": "https://huggingface.co/Qwen/QwQ-32B",
-                "offline": false,
-                "traits": []
-            },
-            "object": "model",
-            "owned_by": "venice.ai",
-            "type": "text"
-        },
-        {
-            "created": 1745903059,
-            "id": "qwen3-4b",
-            "model_spec": {
-                "pricing": {
-                    "input": {
-                        "usd": 0.15,
-                        "vcu": 1.5
-                    },
-                    "output": {
-                        "usd": 0.6,
-                        "vcu": 6
-                    }
-                },
-                "availableContextTokens": 32768,
-                "capabilities": {
-                    "optimizedForCode": false,
-                    "quantization": "fp8",
-                    "supportsFunctionCalling": true,
-                    "supportsReasoning": true,
-                    "supportsResponseSchema": true,
-                    "supportsVision": false,
-                    "supportsWebSearch": true,
-                    "supportsLogProbs": true
-                },
-                "constraints": {
-                    "temperature": {
-                        "default": 0.6
-                    },
-                    "top_p": {
-                        "default": 0.95
-                    }
-                },
-                "name": "Venice Small",
-                "modelSource": "https://huggingface.co/Qwen/Qwen3-4B",
-                "offline": false,
-                "traits": []
-            },
-            "object": "model",
-            "owned_by": "venice.ai",
-            "type": "text"
-        },
-        {
-            "created": 1742262554,
-            "id": "mistral-31-24b",
-            "model_spec": {
-                "pricing": {
-                    "input": {
-                        "usd": 0.5,
-                        "vcu": 5
-                    },
-                    "output": {
-                        "usd": 2,
-                        "vcu": 20
-                    }
-                },
-                "availableContextTokens": 131072,
-                "capabilities": {
-                    "optimizedForCode": false,
-                    "quantization": "fp16",
-                    "supportsFunctionCalling": true,
-                    "supportsReasoning": false,
-                    "supportsResponseSchema": true,
-                    "supportsVision": true,
-                    "supportsWebSearch": true,
-                    "supportsLogProbs": false
-                },
-                "constraints": {
-                    "temperature": {
-                        "default": 0.15
-                    },
-                    "top_p": {
-                        "default": 1
-                    }
-                },
-                "name": "Venice Medium",
-                "modelSource": "https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503",
-                "offline": false,
-                "traits": [
-                    "default_vision"
-                ]
-            },
-            "object": "model",
-            "owned_by": "venice.ai",
-            "type": "text"
-        },
-        {
-            "created": 1745903059,
-            "id": "qwen3-235b",
-            "model_spec": {
-                "pricing": {
-                    "input": {
-                        "usd": 1.5,
-                        "vcu": 15
-                    },
-                    "output": {
-                        "usd": 6,
-                        "vcu": 60
-                    }
-                },
-                "availableContextTokens": 131072,
-                "capabilities": {
-                    "optimizedForCode": false,
-                    "quantization": "fp8",
-                    "supportsFunctionCalling": true,
-                    "supportsReasoning": true,
-                    "supportsResponseSchema": true,
-                    "supportsVision": false,
-                    "supportsWebSearch": true,
-                    "supportsLogProbs": true
-                },
-                "constraints": {
-                    "temperature": {
-                        "default": 0.6
-                    },
-                    "top_p": {
-                        "default": 0.95
-                    }
-                },
-                "name": "Venice Large",
-                "modelSource": "https://huggingface.co/Qwen/Qwen3-235B-A22B",
-                "offline": false,
-                "traits": []
-            },
-            "object": "model",
-            "owned_by": "venice.ai",
-            "type": "text"
-        },
-        {
-            "created": 1727966436,
-            "id": "llama-3.2-3b",
-            "model_spec": {
-                "pricing": {
-                    "input": {
-                        "usd": 0.15,
-                        "vcu": 1.5
-                    },
-                    "output": {
-                        "usd": 0.6,
-                        "vcu": 6
-                    }
-                },
-                "availableContextTokens": 131072,
-                "capabilities": {
-                    "optimizedForCode": false,
-                    "quantization": "fp16",
-                    "supportsFunctionCalling": true,
-                    "supportsReasoning": false,
-                    "supportsResponseSchema": true,
-                    "supportsVision": false,
-                    "supportsWebSearch": true,
-                    "supportsLogProbs": true
-                },
-                "constraints": {
-                    "temperature": {
-                        "default": 0.6
-                    },
-                    "top_p": {
-                        "default": 0.95
-                    }
-                },
-                "name": "Llama 3.2 3B",
-                "modelSource": "https://huggingface.co/meta-llama/Llama-3.2-3B",
-                "offline": false,
-                "traits": [
-                    "fastest"
-                ]
-            },
-            "object": "model",
-            "owned_by": "venice.ai",
-            "type": "text"
-        },
-        {
-            "created": 1733768349,
-            "id": "llama-3.3-70b",
-            "model_spec": {
-                "pricing": {
-                    "input": {
-                        "usd": 0.7,
-                        "vcu": 7
-                    },
-                    "output": {
-                        "usd": 2.8,
-                        "vcu": 28
-                    }
-                },
-                "availableContextTokens": 65536,
-                "capabilities": {
-                    "optimizedForCode": false,
-                    "quantization": "fp8",
-                    "supportsFunctionCalling": true,
-                    "supportsReasoning": false,
-                    "supportsResponseSchema": false,
-                    "supportsVision": false,
-                    "supportsWebSearch": true,
-                    "supportsLogProbs": false
-                },
-                "constraints": {
-                    "temperature": {
-                        "default": 0.6
-                    },
-                    "top_p": {
-                        "default": 0.95
-                    }
-                },
-                "name": "Llama 3.3 70B",
-                "modelSource": "https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct",
-                "offline": false,
-                "traits": [
-                    "function_calling_default",
-                    "default"
-                ]
-            },
-            "object": "model",
-            "owned_by": "venice.ai",
-            "type": "text"
-        },
-        {
-            "created": 1730396371,
-            "id": "llama-3.1-405b",
-            "model_spec": {
-                "pricing": {
-                    "input": {
-                        "usd": 1.5,
-                        "vcu": 15
-                    },
-                    "output": {
-                        "usd": 6,
-                        "vcu": 60
-                    }
-                },
-                "availableContextTokens": 65536,
-                "capabilities": {
-                    "optimizedForCode": false,
-                    "quantization": "fp8",
-                    "supportsFunctionCalling": false,
-                    "supportsReasoning": false,
-                    "supportsResponseSchema": true,
-                    "supportsVision": false,
-                    "supportsWebSearch": true,
-                    "supportsLogProbs": true
-                },
-                "constraints": {
-                    "temperature": {
-                        "default": 0.6
-                    },
-                    "top_p": {
-                        "default": 0.95
-                    }
-                },
-                "name": "Llama 3.1 405B",
-                "modelSource": "https://huggingface.co/meta-llama/Meta-Llama-3.1-405B-Instruct",
-                "offline": false,
-                "traits": [
-                    "most_intelligent"
-                ]
-            },
-            "object": "model",
-            "owned_by": "venice.ai",
-            "type": "text"
-        },
-        {
-            "created": 1726869022,
-            "id": "dolphin-2.9.2-qwen2-72b",
-            "model_spec": {
-                "pricing": {
-                    "input": {
-                        "usd": 0.7,
-                        "vcu": 7
-                    },
-                    "output": {
-                        "usd": 2.8,
-                        "vcu": 28
-                    }
-                },
-                "availableContextTokens": 32768,
-                "capabilities": {
-                    "optimizedForCode": false,
-                    "quantization": "fp8",
-                    "supportsFunctionCalling": false,
-                    "supportsReasoning": false,
-                    "supportsResponseSchema": true,
-                    "supportsVision": false,
-                    "supportsWebSearch": true,
-                    "supportsLogProbs": true
-                },
-                "constraints": {
-                    "temperature": {
-                        "default": 0.7
-                    },
-                    "top_p": {
-                        "default": 0.8
-                    }
-                },
-                "name": "Dolphin 72B",
-                "modelSource": "https://huggingface.co/cognitivecomputations/dolphin-2.9.2-qwen2-72b",
-                "offline": false,
-                "traits": [
-                    "most_uncensored"
-                ]
-            },
-            "object": "model",
-            "owned_by": "venice.ai",
-            "type": "text"
-        },
-        {
-            "created": 1739074852,
-            "id": "qwen-2.5-vl",
-            "model_spec": {
-                "pricing": {
-                    "input": {
-                        "usd": 0.7,
-                        "vcu": 7
-                    },
-                    "output": {
-                        "usd": 2.8,
-                        "vcu": 28
-                    }
-                },
-                "availableContextTokens": 32768,
-                "capabilities": {
-                    "optimizedForCode": false,
-                    "quantization": "fp8",
-                    "supportsFunctionCalling": false,
-                    "supportsReasoning": false,
-                    "supportsResponseSchema": true,
-                    "supportsVision": true,
-                    "supportsWebSearch": true,
-                    "supportsLogProbs": true
-                },
-                "constraints": {
-                    "temperature": {
-                        "default": 0.7
-                    },
-                    "top_p": {
-                        "default": 0.8
-                    }
-                },
-                "name": "Qwen 2.5 VL 72B",
-                "modelSource": "https://huggingface.co/Qwen/Qwen2.5-VL-72B-Instruct",
-                "offline": false,
-                "traits": []
-            },
-            "object": "model",
-            "owned_by": "venice.ai",
-            "type": "text"
-        },
-        {
-            "created": 1731628653,
-            "id": "qwen-2.5-coder-32b",
-            "model_spec": {
-                "pricing": {
-                    "input": {
-                        "usd": 0.5,
-                        "vcu": 5
-                    },
-                    "output": {
-                        "usd": 2,
-                        "vcu": 20
-                    }
-                },
-                "availableContextTokens": 32768,
-                "capabilities": {
-                    "optimizedForCode": true,
-                    "quantization": "fp8",
-                    "supportsFunctionCalling": false,
-                    "supportsReasoning": false,
-                    "supportsResponseSchema": false,
-                    "supportsVision": false,
-                    "supportsWebSearch": false,
-                    "supportsLogProbs": true
-                },
-                "constraints": {
-                    "temperature": {
-                        "default": 0.7
-                    },
-                    "top_p": {
-                        "default": 0.8
-                    }
-                },
-                "name": "Qwen 2.5 Coder 32B",
-                "modelSource": "https://huggingface.co/Qwen/Qwen2.5-Coder-32B-Instruct-GGUF",
-                "offline": false,
-                "traits": [
-                    "default_code"
-                ]
-            },
-            "object": "model",
-            "owned_by": "venice.ai",
-            "type": "text"
-        },
-        {
-            "created": 1738690625,
-            "id": "deepseek-r1-671b",
-            "model_spec": {
-                "pricing": {
-                    "input": {
-                        "usd": 3.5,
-                        "vcu": 35
-                    },
-                    "output": {
-                        "usd": 14,
-                        "vcu": 140
-                    }
-                },
-                "availableContextTokens": 131072,
-                "capabilities": {
-                    "optimizedForCode": false,
-                    "quantization": "fp8",
-                    "supportsFunctionCalling": false,
-                    "supportsReasoning": true,
-                    "supportsResponseSchema": true,
-                    "supportsVision": false,
-                    "supportsWebSearch": true,
-                    "supportsLogProbs": false
-                },
-                "constraints": {
-                    "temperature": {
-                        "default": 0.6
-                    },
-                    "top_p": {
-                        "default": 0.95
-                    }
-                },
-                "name": "DeepSeek R1 671B",
-                "modelSource": "https://huggingface.co/deepseek-ai/DeepSeek-R1",
-                "offline": false,
-                "traits": [
-                    "default_reasoning"
-                ]
-            },
-            "object": "model",
-            "owned_by": "venice.ai",
-            "type": "text"
-        },
-        {
-            "created": 1740253117,
-            "id": "deepseek-coder-v2-lite",
-            "model_spec": {
-                "pricing": {
-                    "input": {
-                        "usd": 0.5,
-                        "vcu": 5
-                    },
-                    "output": {
-                        "usd": 2,
-                        "vcu": 20
-                    }
-                },
-                "availableContextTokens": 131072,
-                "capabilities": {
-                    "optimizedForCode": true,
-                    "quantization": "fp16",
-                    "supportsFunctionCalling": false,
-                    "supportsReasoning": false,
-                    "supportsResponseSchema": true,
-                    "supportsVision": false,
-                    "supportsWebSearch": false,
-                    "supportsLogProbs": false
-                },
-                "constraints": {
-                    "temperature": {
-                        "default": 0.6
-                    },
-                    "top_p": {
-                        "default": 0.95
-                    }
-                },
-                "name": "DeepSeek Coder V2 Lite",
-                "modelSource": "https://huggingface.co/deepseek-ai/deepseek-coder-v2-lite-Instruct",
-                "offline": false,
-                "traits": []
-            },
-            "object": "model",
-            "owned_by": "venice.ai",
-            "type": "text"
-        }
-    ],
-    "object": "list",
-    "type": "text"
-}
-```

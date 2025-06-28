@@ -120,7 +120,20 @@ Query: "good family restaurant serving pizza near downtown Mumbai"
 Response: {"tags": ["family restaurant", "pizza"], "place": "mumbai"}
 
 Query: "best Italian restaurant in Bangalore"
+Response: {"tags": ["Italian"], "place": "bangalore"}
+
+Query: "pizza"
+Response: {"tags": ["pizza"]}
+
+Query: "best restaurant in Bangalore"
+Response: {"place": "bangalore"}
+
+Query: "find butter chicken in Bangalore"
+Response: {"tags": ["butter chicken"], "place": "bangalore"}
+
+Query: "best Italian restaurant in Bangalore"
 Response: {"tags": ["Italian"], "place": "bangalore"}"""
+
 
         user_message = f"Extract tags and place from this restaurant search query: {query}"
 
