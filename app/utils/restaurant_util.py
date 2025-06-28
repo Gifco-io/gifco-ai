@@ -132,8 +132,14 @@ Query: "find butter chicken in Bangalore"
 Response: {"tags": ["butter chicken"], "place": "bangalore"}
 
 Query: "best Italian restaurant in Bangalore"
-Response: {"tags": ["Italian"], "place": "bangalore"}"""
+Response: {"tags": ["Italian"], "place": "bangalore"}
 
+Query: "best bars in delhi"
+Response: {"tags": ["bar"], "place": "delhi"}
+
+Query: "bars"
+Response: {"tags": ["bar"]}
+"""
 
         user_message = f"Extract tags and place from this restaurant search query: {query}"
 
